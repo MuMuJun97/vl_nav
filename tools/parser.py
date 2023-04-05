@@ -3,7 +3,7 @@ import random
 import numpy as np
 import torch
 import os
-from .train.distributed import world_info_from_env
+from tools.train.distributed import world_info_from_env
 
 
 def random_seed(seed=42, rank=0):
