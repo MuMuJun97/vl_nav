@@ -4,7 +4,7 @@ Dataset:
   # navigableLocations
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
-  SOON_DIR: "datasets/SOON/annotations/iccv21_new_released" # train.json
+  SOON_DIR: "data/SOON/annotations/iccv21_new_released" # train.json
   SOON_SPLIT: {
     "train": "train.json",
     "val_seen": "val_unseen_house.json",
@@ -12,7 +12,7 @@ Dataset:
     "test": "test_v2.json"
   }
 
-  FR2R_DIR: "datasets/Fine-Grained-R2R/data" # FGR2R_train.json
+  FR2R_DIR: "data/Fine-Grained-R2R/data" # FGR2R_train.json
   FR2R_SPLIT: {
     "train": "FGR2R_train.json",
     "val_seen": "FGR2R_val_seen.json",

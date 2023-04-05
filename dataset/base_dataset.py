@@ -12,16 +12,16 @@ import torch.utils.data as torch_data
 from pathlib import Path
 
 class BaseDataset(torch_data.Dataset):
-    def __init__(self,config, split, tokenizer=None, training=True, logger=None, in_memory=True):
+    def __init__(self,config, split, training=True, logger=None, in_memory=True):
         super().__init__()
         self.config = config
         self.split = split
-        # self.tokenizer = tokenizer
         self.training = training
         self.logger = logger
         self.data_dir = Path(config.DATA_DIR).resolve()
-        self.soon_file = self.data_dir / self.config.SOON_DIR / self.config.SOON_SPLIT[split]
-        self.fr2r_file = self.data_dir / self.config.FR2R_DIR / self.config.FR2R_SPLIT[split]
+        root_dir = Path(__file__).parent.parent.resolve()
+        self.soon_file = root_dir / self.config.SOON_DIR / self.config.SOON_SPLIT[split]
+        self.fr2r_file = root_dir / self.config.FR2R_DIR / self.config.FR2R_SPLIT[split]
 
         # read Matterport3D navigableLocations
         self.navigable_loc = self.get_navigable_Locations()
@@ -142,17 +142,6 @@ class BaseDataset(torch_data.Dataset):
         answer = " ".join(answer.split())
         text = " ".join([question, answer])
         input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
-
-        # self.tokenizer.padding_side = "right"
-        # text = self.tokenizer(
-        #     input_text,
-        #     max_length=64,
-        #     padding="longest",
-        #     truncation="only_first",
-        #     return_tensors="pt",
-        # )
-        # text["input_ids"], text["attention_mask"]
-
         return input_text
 
     def get_data_dict(self, item, scan, index):
@@ -255,8 +244,10 @@ def build_dataloader(dataset,batch_size,dist=False,training=True,workers=0,seed=
     else:
         sampler = None
 
-    shuffle = False
-    # shuffle=(sampler is None) and training
+    if dist:
+        shuffle = (sampler is None) and training
+    else:
+        shuffle = False
 
     dataloader = DataLoader(
         dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,

@@ -11,6 +11,7 @@ def create_model_and_transforms(
     clip_vision_encoder_pretrained: str,
     lang_encoder_path: str,
     tokenizer_path: str,
+    enable_offline_vision_encoder: bool = False,
     cross_attn_every_n_layers: int = 1,
     use_local_files: bool = False,
     decoder_layers_attr_name: str = None,
@@ -25,6 +26,7 @@ def create_model_and_transforms(
         clip_vision_encoder_pretrained (str): name of pretraining dataset for clip model (e.g. "laion2b_s32b_b79k")
         lang_encoder_path (str): path to pretrained language encoder
         tokenizer_path (str): path to pretrained tokenizer
+        enable_offline_vision_encoder (bool, optional): 使用local image view features.
         cross_attn_every_n_layers (int, optional): determines how often to add a cross-attention layer. Defaults to 1.
         use_local_files (bool, optional): whether to use local files. Defaults to False.
         decoder_layers_attr_name (str, optional): name of the decoder layers attribute. Defaults to None.
@@ -33,8 +35,6 @@ def create_model_and_transforms(
         Image processor: Pipeline to preprocess input images
         Tokenizer: A tokenizer for the language model
     """
-
-    enable_offline_vision_encoder = True
     if enable_offline_vision_encoder:
         vision_encoder = None
         image_processor = None

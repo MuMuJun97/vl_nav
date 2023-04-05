@@ -2,6 +2,8 @@ import argparse
 import random
 import numpy as np
 import torch
+import os
+from tools.train.distributed import world_info_from_env
 
 
 def random_seed(seed=42, rank=0):
@@ -114,5 +116,11 @@ def read_args():
     )
 
     args = parser.parse_args()
+
+    if args.offline:
+        os.environ["WANDB_MODE"] = "offline"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+    args.local_rank, args.rank, args.world_size = world_info_from_env()
 
     return args
