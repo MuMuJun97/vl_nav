@@ -3,8 +3,12 @@ Taken from https://github.com/lucidrains/flamingo-pytorch
 """
 
 import torch
-from einops import rearrange, repeat
-from einops_exts import rearrange_many
+try:
+    from einops import rearrange, repeat
+    from einops_exts import rearrange_many
+except Exception as e:
+    print(e)
+    print('pip install einops,einops-exts')
 from torch import einsum, nn
 
 

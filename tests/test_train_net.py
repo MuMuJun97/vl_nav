@@ -1,5 +1,9 @@
 import glob
 import os
+import sys
+from pathlib import Path
+pro = Path(__file__).parent.parent.resolve()
+sys.path.append(str(pro))
 import random
 import numpy as np
 import torch
