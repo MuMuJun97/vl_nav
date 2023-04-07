@@ -3,7 +3,10 @@ from collections import defaultdict
 import numpy as np
 from .preprocess_data import preprocess_soon,preprocess_fr2r
 from tools.train import common_utils
+from PIL import Image
 import torch
+import torchvision
+import cv2
 from functools import partial
 from torch.utils.data import DataLoader
 from torch.utils.data import DistributedSampler as _DistributedSampler
@@ -45,16 +48,30 @@ class BaseDataset(torch_data.Dataset):
 
         self.data = self.soon_data + self.fr2r_data
 
-        # read image features
-        self.in_memory = in_memory
-        if self.in_memory:
-            self._feature_store = {}
-        self.img_ft_file = self.data_dir / self.config.Img_Features_File_Map
-
-        if config.With_Object_Feats:
-            self.obj_ft_file = self.data_dir / self.config.Object_Features_File_Map
-        else:
+        if self.config.get('IMG_DIR',None) is not None:
+            self.in_memory = in_memory
+            self.img_ft_file = None
             self.obj_ft_file = None
+            self.img_dir = Path(self.config.IMG_DIR).resolve()
+            from open_clip.transform import image_transform
+            self.image_preprocess = image_transform(
+                self.config.vision_encoder.image_size,
+                is_train=False,
+                mean=None,
+                std=None
+            )
+        else:
+            # read image features
+            self.in_memory = in_memory
+            if self.in_memory:
+                self._feature_store = {}
+            self.img_ft_file = self.data_dir / self.config.Img_Features_File_Map
+
+            if config.With_Object_Feats:
+                self.obj_ft_file = self.data_dir / self.config.Object_Features_File_Map
+            else:
+                self.obj_ft_file = None
+            self.img_dir = None
 
         print('Dataset Initialize')
 
@@ -85,6 +102,35 @@ class BaseDataset(torch_data.Dataset):
         with open(str(mp3d_nav_file),"rb") as f:
             res_dict = pickle.load(f)
         return res_dict
+
+    def read_image(self, scan, viewpoint):
+        img_file = self.img_dir / scan / '{}_{}.png'.format(scan,viewpoint)
+        assert img_file.exists()
+        img = cv2.imread(str(img_file)) # BRG
+        imgs = np.hsplit(img,12)
+
+        images = [
+            self.image_preprocess(
+                Image.fromarray(
+                    s[:,:,::-1] # BRG2RGB
+                )
+            ).unsqueeze(0)
+            for s in imgs
+        ]
+        images = torch.cat(images, dim=0) # [12,3,224,224]
+
+        if self.training:
+            # apply random horizontal flip and color jitter
+            images = torchvision.transforms.RandomHorizontalFlip(p=0.5)(images)
+            images = torchvision.transforms.ColorJitter(brightness=0.5, hue=0.3)(images)
+
+        return images, None, None
+
+    def get_image_data(self, scan, viewpoint):
+        if self.img_dir is not None:
+            return self.read_image(scan, viewpoint)
+        else:
+            return self.get_scan_viewpoint_feature(scan, viewpoint)
 
     def get_scan_viewpoint_feature(self, scan, viewpoint, enable_HFOV=False, only_img_feats=True):
         """
@@ -140,7 +186,7 @@ class BaseDataset(torch_data.Dataset):
         prompt = self.prompt # '<image>{text}<|endofchunk|>{tokenizer_eos_token}'
         question = " ".join(question.split())
         answer = " ".join(answer.split())
-        text = " ".join([question, answer])
+        text = "{question}{answer}".format(question=question,answer=answer)
         input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
         return input_text
 
@@ -152,7 +198,7 @@ class BaseDataset(torch_data.Dataset):
             vp_index = 0 # start viewpoint
             # for fine-grained dataset: sub-path <-> sub-instruction
             viewpoint = item['path'][vp_index]
-            view_fts, obj_img_fts, obj_attrs = self.get_scan_viewpoint_feature(scan, viewpoint)
+            view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint)
 
             ViewpointNext = item['navigable_pathViewIds'][vp_index] # next direction {0..11}, -1 means STOP
 
@@ -164,18 +210,26 @@ class BaseDataset(torch_data.Dataset):
             vp_index = -1  # end viewpoint
             # for soon dataset: end viewpoint is the target location <-> instructions
             viewpoint = item['path'][vp_index] # item['path'][-1] is the goal location
-            view_fts, obj_img_fts, obj_attrs = self.get_scan_viewpoint_feature(scan, viewpoint)
+            view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint)
 
         input_text = self.generate_input_text(
             question=question,
             answer=answer,
         )
 
-        data_dict = {
-            'input_text': input_text,
-            'img_feats': view_fts[:, :self.config.image_feat_size],
-            'obj_feats': obj_img_fts[:, :self.config.obj_feat_size] if self.obj_ft_file is not None else None,
-        }
+        if self.img_dir is not None:
+            data_dict = {
+                'input_text': input_text,
+                'imgs': view_fts,
+            }
+        else:
+            data_dict = {
+                'input_text': input_text,
+                'img_feats': view_fts[:, :self.config.image_feat_size],
+                'obj_feats': obj_img_fts[:, :self.config.obj_feat_size] if self.obj_ft_file is not None else None,
+            }
+            if data_dict.get('obj_feats', None) is None:
+                data_dict.pop('obj_feats')
         return data_dict
 
     def __getitem__(self, index):
@@ -183,9 +237,6 @@ class BaseDataset(torch_data.Dataset):
         scan = item['scan']
 
         data_dict = self.get_data_dict(item,scan,index)
-
-        if data_dict.get('obj_feats',None) is None:
-            data_dict.pop('obj_feats')
 
         return data_dict
 
@@ -201,8 +252,11 @@ class BaseDataset(torch_data.Dataset):
             try:
                 if key in ['input_text']:
                     ret[key] = val
+                elif key in ['imgs']:
+                    ret[key] = torch.stack(val, 0)
                 else:
-                    ret[key] = np.stack(val, axis=0) # ['img_feats'] (B,12,768)
+                    np_val = np.stack(val, axis=0) # ['img_feats'] (B,12,768)
+                    ret[key] = torch.from_numpy(np_val)
             except:
                 print('Error in collate_batch: key=%s' % key)
                 raise TypeError
@@ -254,5 +308,5 @@ def build_dataloader(dataset,batch_size,dist=False,training=True,workers=0,seed=
         shuffle=shuffle, collate_fn=dataset.collate_batch,
         drop_last=False, sampler=sampler, timeout=0, worker_init_fn=partial(common_utils.worker_init_fn, seed=seed)
     )
-
+    dataloader.num_batches = len(dataloader)
     return dataset, dataloader, sampler

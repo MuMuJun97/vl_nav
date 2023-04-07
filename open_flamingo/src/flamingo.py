@@ -34,6 +34,10 @@ class Flamingo(nn.Module):
         self.vis_dim = vis_dim
         self.vision_encoder = vision_encoder
         self.perceiver = PerceiverResampler(dim=self.vis_dim)
+
+        # TODO
+        # self.multi_view_fusion =
+
         self.lang_encoder = lang_encoder
         self.lang_encoder.init_flamingo(
             media_token_id=media_token_id,
@@ -52,6 +56,7 @@ class Flamingo(nn.Module):
         clear_conditioned_layers: bool = True,
         past_key_values=None,
         use_cache: bool = False,
+        use_local_vision: bool = True,
     ):
         """
         Forward pass of Flamingo.
@@ -72,24 +77,30 @@ class Flamingo(nn.Module):
                 CausalLM models.
             use_cache: whether to use cached key values. See use_cache
                 documentation in Hugging Face CausalLM models.
+            use_local_vision: VLN-DUET local image features.
         """
-        assert (
-            vision_x is not None
-        ) or use_cached_vision_x, (
-            "Must provide either vision_x or use_cached_vision_x to True."
-        )
-
-        if use_cached_vision_x:
-            # Case: use cached; vision_x should be cached and other
-            # vision-related inputs should not be provided.
-            assert (
-                vision_x is None
-            ), "Expect vision_x to be None when use_cached_vision_x is True."
-            assert self.lang_encoder.is_conditioned()
-
+        if use_local_vision == 'feature':
+            self._encode_vision_with_local(vision_x)
+        elif use_local_vision == 'image':
+            self._encode_multi_view_image(vision_x)
         else:
-            # Case: do not use caching (i.e. this is a standard forward pass);
-            self._encode_vision_x(vision_x=vision_x)
+            assert (
+                vision_x is not None
+            ) or use_cached_vision_x, (
+                "Must provide either vision_x or use_cached_vision_x to True."
+            )
+
+            if use_cached_vision_x:
+                # Case: use cached; vision_x should be cached and other
+                # vision-related inputs should not be provided.
+                assert (
+                    vision_x is None
+                ), "Expect vision_x to be None when use_cached_vision_x is True."
+                assert self.lang_encoder.is_conditioned()
+
+            else:
+                # Case: do not use caching (i.e. this is a standard forward pass);
+                self._encode_vision_x(vision_x=vision_x)
 
         output = self.lang_encoder(
             input_ids=lang_x,
@@ -170,6 +181,53 @@ class Flamingo(nn.Module):
 
         self.lang_encoder.clear_conditioned_layers()
         return output
+
+    def _encode_vision_with_local(self, vision_x: torch.Tensor):
+        """
+        :param vision_x: torch.Size([B, 12, 768])
+        :return:
+        """
+        vision_x = vision_x.unsqueeze(1).unsqueeze(1)
+        NotImplementedError
+
+    def _encode_multi_view_image(self, all_vision_x: torch.Tensor):
+        """
+        Args:
+            vision_x (torch.Tensor): Vision input
+        """
+        assert all_vision_x.ndim == 7, "vision_x should be of shape (b, M, T_img, F, C, H, W)"
+        b, M, T, F = all_vision_x.shape[:4] # Batch size, Multi Views, 1, 1
+        assert F == 1, "Only single frame supported"
+
+        all_vision_x = rearrange(all_vision_x, "b M T F c h w -> (b M) T F c h w")
+
+        vision_x = all_vision_x
+        vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
+        with torch.no_grad():
+            vision_x = self.vision_encoder.visual(vision_x)[1]  # (B*M,256,1024)
+        vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b*M, T=T, F=F)
+        vision_x = self.perceiver(vision_x)  # reshapes to (b*M, T, n, d) (b*M,1,64,1024)
+
+        # TODO: Multi-View Fusion
+        vision_x = rearrange(vision_x, "(b M) t v d -> b M t v d", b=b, M=M) # (b, 12, 1, 64, 1024)
+        avg_pano_vision_x = torch.mean(vision_x,dim=1)
+
+        for layer in self.lang_encoder._get_decoder_layers():
+            layer.condition_vis_x(avg_pano_vision_x)
+
+        # all_vision_feats = []
+        # for m in range(M):
+        #     vision_x = all_vision_x[:,m,...].contiguous()
+        #     vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
+        #     with torch.no_grad():
+        #         vision_x = self.vision_encoder.visual(vision_x)[1] # (B,256,1024)
+        #     vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
+        #     vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
+        #
+        #     # Multi-View: 12 * (B,1,64,1024)
+        #     all_vision_feats.append(vision_x)
+
+
 
     def _encode_vision_x(self, vision_x: torch.Tensor):
         """

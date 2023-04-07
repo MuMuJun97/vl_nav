@@ -15,7 +15,7 @@ def read_args():
     parser = argparse.ArgumentParser()
 
     ############# DATASET #############
-    parser.add_argument('--cfg_file', type=str, default="tools/cfgs/datasets/datasets.yaml", help='dataset configs')
+    parser.add_argument('--cfg_file', type=str, default="tools/cfgs/datasets/imgdatasets.yaml", help='dataset configs')
     parser.add_argument('--img_feats', type=str, default="vit_imagenet", help='dataset configs')
     parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='dataset configs')
     parser.add_argument('--split', type=str, default="train", help='dataset configs')
@@ -23,7 +23,7 @@ def read_args():
     ############# FLAMINGO #############
     parser.add_argument("--vision_encoder_path", default="ViT-L-14", type=str)
     parser.add_argument("--vision_encoder_pretrained", default="openai", type=str)
-    parser.add_argument("--lm_path", default="facebook/opt-125m", type=str) # mini language model
+    # parser.add_argument("--lm_path", default="facebook/opt-125m", type=str) # mini language model
     parser.add_argument(
         "--tokenizer_path",
         default="facebook/opt-125m",
@@ -46,7 +46,7 @@ def read_args():
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument(
-        "--logging_steps", type=int, default=100, help="log loss every n steps"
+        "--logging_steps", type=int, default=2, help="log loss every n steps"
     )
 
     # Sum of gradient optimization batch size
@@ -116,6 +116,8 @@ def read_args():
     )
 
     args = parser.parse_args()
+
+    args.lm_path = args.tokenizer_path
 
     if args.offline:
         os.environ["WANDB_MODE"] = "offline"

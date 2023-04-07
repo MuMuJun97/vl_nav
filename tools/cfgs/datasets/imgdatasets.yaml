@@ -1,0 +1,58 @@
+Dataset:
+  DATA_DIR: "/home/zlin/vln/turning/VLN-DUET"
+  IMG_DIR: "/media/zlin/2CD830B2D8307C60/Dataset/features/mp3d_raw_images"
+
+  # navigableLocations
+  MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
+
+  SOON_DIR: "data/SOON/annotations/iccv21_new_released" # train.json
+  SOON_SPLIT: {
+    "train": "train.json",
+    "val_seen": "val_unseen_house.json",
+    "val_unseen": "val_unseen_instrs.json",
+    "test": "test_v2.json"
+  }
+
+  FR2R_DIR: "data/Fine-Grained-R2R/data" # FGR2R_train.json
+  FR2R_SPLIT: {
+    "train": "FGR2R_train.json",
+    "val_seen": "FGR2R_val_seen.json",
+    "val_unseen": "FGR2R_val_unseen.json",
+    "test": "FGR2R_test.json"
+  }
+
+  Img_Features_File_Map: {
+    # from HM3D-AutoVLN
+    "timm_vitb16": "datasets/R2R/features/view_timm_imagenet_vitb16",
+    # from VLN-DUET/SOON pretrain&fine-tuning
+    "vit_imagenet": "datasets/R2R/features/pth_vit_base_patch16_224_imagenet.hdf5"
+  }
+  image_feat_size: 768
+  image_prob_size: 1000
+
+  With_Object_Feats: False
+  Object_Features_File_Map: {
+    # from VLN-DUET/SOON pretrain&fine-tuning
+    "butd_SOON": "datasets/SOON/features/filtered_butd_bboxes.hdf5",
+    # from HM3D-AutoVLN/SOON
+    "timm_vitb16_SOON": "datasets/SOON/features/obj2d_ade20k_timm_vitb16",
+    # from HM3D-AutoVLN/REVERIE
+    "timm_vitb16_REVERIE": "datasets/REVERIE/features/obj_gtmax_timm_imagenet_vitb16",
+    # from VLN-DUET/REVERIE pretrain&fine-tuning
+    "vit_base_REVERIE": "datasets/REVERIE/features/obj.avg.top3.min80_vit_base_patch16_224_imagenet.hdf5"
+  }
+  obj_feat_size: 2048
+  obj_prob_size: 1601
+  max_objects: 100
+
+  # tokenizer.eos_token
+  tokenizer:
+    eos_token: '</s>'
+
+    prompt: "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
+    # prompt_MV: <image_0><image_1><image_2><image_3><image_4><image_5><image_6><image_7><image_8><image_9><image_10><image_11>{text}<|endofchunk|>{tokenizer_eos_token}
+
+  vision_encoder:
+    image_size: [224,224]
+    path: "ViT-L-14"
+    pretrained: "openai"
