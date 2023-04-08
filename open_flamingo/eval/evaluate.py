@@ -27,30 +27,52 @@ from open_flamingo.eval.imagenet_utils import (
 
 from open_flamingo.src.factory import create_model_and_transforms
 
+"""
+
+CKPT_PATH="checkpoint.pt"
+DEVICE="0"
+python open_flamingo/eval/evaluate.py \
+    --device $DEVICE \
+    
+    --coco_image_dir_path $COCO_IMG_PATH \
+    --coco_annotations_json_path $COCO_ANNO_PATH \
+    --vqav2_image_dir_path $VQAV2_IMG_PATH \
+    --vqav2_annotations_json_path $VQAV2_ANNO_PATH \
+    --vqav2_questions_json_path $VQAV2_QUESTION_PATH \
+
+    --eval_coco \
+    --eval_vqav2 \
+    --num_samples 5000 \
+
+"""
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--lm_path", type=str, default="facebook/opt-1.3b")
-parser.add_argument("--lm_tokenizer_path", type=str, default="facebook/opt-30b")
-parser.add_argument("--vision_encoder_path", default="ViT-L-14", type=str)
+parser.add_argument("--lm_path", type=str, default="facebook/opt-125m")
+parser.add_argument("--lm_tokenizer_path", type=str, default="facebook/opt-125m") # TODO
+parser.add_argument("--vision_encoder_path", default="ViT-B-16", type=str)
 parser.add_argument("--vision_encoder_pretrained", default="openai", type=str)
-parser.add_argument("--checkpoint_path", type=str, required=True)
+parser.add_argument("--checkpoint_path", type=str, required=False) # TODO require=True 模型路径.
 parser.add_argument(
     "--cross_attn_every_n_layers",
     type=int,
-    default=1,
+    default=4, # TODO 与训练保持相同.
     help="how often to add a cross-attention layer after each transformer layer",
 )
 parser.add_argument(
-    "--results_file", type=str, default=None, help="JSON file to save results"
-)
+    "--results_file", type=str, default="results.json", help="JSON file to save results"
+) # TODO
 
 # Trial arguments
-parser.add_argument("--shots", nargs="+", default=[0, 4, 8, 16, 32], type=int)
+# parser.add_argument("--shots", nargs="+", default=[0, 4, 8, 16, 32], type=int) # 8? TODO
+parser.add_argument("--shots", default=[4], type=int) # 8? TODO ???
+
 parser.add_argument(
     "--num_trials",
     type=int,
     default=1,
     help="Number of trials to run for each shot using different demonstrations",
-)
+) # TODO 默认为1
+
 parser.add_argument(
     "--trial_seeds",
     nargs="+",
@@ -58,11 +80,11 @@ parser.add_argument(
     help="Seeds to use for each trial for picking demonstrations and eval sets",
 )
 parser.add_argument(
-    "--num_samples", type=int, default=5000, help="Number of samples to evaluate on"
+    "--num_samples", type=int, default=20, help="Number of samples to evaluate on"
 )
 
-parser.add_argument("--batch_size", type=int, default=8)
-parser.add_argument("--device", type=int, default=0)
+parser.add_argument("--batch_size", type=int, default=2)
+parser.add_argument("--device", type=int, default=0) # 默认0
 
 # Per-dataset evaluation flags
 parser.add_argument(
@@ -73,8 +95,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--eval_vqav2",
-    action="store_true",
-    default=False,
+    # action="store_true",
+    default=True, # 评估
     help="Whether to evaluate on VQAV2.",
 )
 parser.add_argument(
@@ -130,17 +152,17 @@ parser.add_argument(
 parser.add_argument(
     "--vqav2_image_dir_path",
     type=str,
-    default=None,
+    default="/media/zlin/2CD830B2D8307C60/Dataset/vqa",
 )
 parser.add_argument(
     "--vqav2_questions_json_path",
     type=str,
-    default=None,
+    default="/media/zlin/2CD830B2D8307C60/Dataset/vqa",
 )
 parser.add_argument(
     "--vqav2_annotations_json_path",
     type=str,
-    default=None,
+    default="/media/zlin/2CD830B2D8307C60/Dataset/vqa",
 )
 
 ## OK-VQA Dataset
@@ -179,87 +201,11 @@ def main():
         cross_attn_every_n_layers=args.cross_attn_every_n_layers,
     )
 
-    checkpoint = torch.load(args.checkpoint_path, map_location="cpu")
-    flamingo.load_state_dict(checkpoint, strict=False)
+    # checkpoint = torch.load(args.checkpoint_path, map_location="cpu")
+    # flamingo.load_state_dict(checkpoint, strict=False)
     flamingo.to(args.device if args.device >= 0 else "cpu")
 
     results = defaultdict(list)
-
-    if args.eval_flickr30:
-        print("Evaluating on Flickr30...")
-        for shot in args.shots:
-            scores = []
-            for seed, trial in zip(args.trial_seeds, range(args.num_trials)):
-                cider_score = evaluate_coco_flickr(
-                    model=flamingo,
-                    tokenizer=tokenizer,
-                    image_processor=image_processor,
-                    batch_size=args.batch_size,
-                    image_dir_path=args.flickr_image_dir_path,
-                    annotations_json_path=args.flickr_annotations_json_path,
-                    num_samples=args.num_samples,
-                    num_shots=shot,
-                    device=args.device,
-                    seed=seed,
-                    is_flickr=True,
-                )
-                print(f"Shots {shot} Trial {trial} CIDEr score: {cider_score}")
-                scores.append(cider_score)
-            print(f"Shots {shot} Mean CIDEr score: {np.mean(scores)}")
-            results["flickr30"].append(
-                {"shots": shot, "trials": scores, "mean": np.mean(scores)}
-            )
-    results = defaultdict(list)
-
-    if args.eval_coco:
-        print("Evaluating on COCO...")
-        for shot in args.shots:
-            scores = []
-            for seed, trial in zip(args.trial_seeds, range(args.num_trials)):
-                cider_score = evaluate_coco_flickr(
-                    model=flamingo,
-                    tokenizer=tokenizer,
-                    image_processor=image_processor,
-                    batch_size=args.batch_size,
-                    image_dir_path=args.coco_image_dir_path,
-                    annotations_json_path=args.coco_annotations_json_path,
-                    num_samples=args.num_samples,
-                    num_shots=shot,
-                    device=args.device,
-                    seed=seed,
-                )
-                print(f"Shots {shot} Trial {trial} CIDEr score: {cider_score}")
-                scores.append(cider_score)
-            print(f"Shots {shot} Mean CIDEr score: {np.mean(scores)}")
-            results["coco"].append(
-                {"shots": shot, "trials": scores, "mean": np.mean(scores)}
-            )
-
-    if args.eval_ok_vqa:
-        print("Evaluating on OK-VQA...")
-        for shot in args.shots:
-            scores = []
-            for seed, trial in zip(args.trial_seeds, range(args.num_trials)):
-                ok_vqa_score = evaluate_vqa(
-                    model=flamingo,
-                    tokenizer=tokenizer,
-                    image_processor=image_processor,
-                    batch_size=args.batch_size,
-                    num_samples=args.num_samples,
-                    num_shots=shot,
-                    device=args.device,
-                    seed=seed,
-                    image_dir_path=args.ok_vqa_image_dir_path,
-                    questions_json_path=args.ok_vqa_questions_json_path,
-                    annotations_json_path=args.ok_vqa_annotations_json_path,
-                    vqa_dataset="ok_vqa",
-                )
-                print(f"Shots {shot} Trial {trial} OK-VQA score: {ok_vqa_score}")
-                scores.append(ok_vqa_score)
-            print(f"Shots {shot} Mean OK-VQA score: {np.mean(scores)}")
-            results["ok_vqa"].append(
-                {"shots": shot, "trials": scores, "mean": np.mean(scores)}
-            )
 
     if args.eval_vqav2:
         print("Evaluating on VQAv2...")
@@ -275,7 +221,7 @@ def main():
                     num_shots=shot,
                     device=args.device,
                     seed=seed,
-                    image_dir_path=args.vqav2_image_dir_path,
+                    image_dir_path=args.vqav2_image_dir_path, # TODO
                     questions_json_path=args.vqav2_questions_json_path,
                     annotations_json_path=args.vqav2_annotations_json_path,
                     vqa_dataset="vqa",
@@ -284,31 +230,6 @@ def main():
                 scores.append(vqa_score)
             print(f"Shots {shot} Mean VQA score: {np.mean(scores)}")
             results["vqav2"].append(
-                {"shots": shot, "trials": scores, "mean": np.mean(scores)}
-            )
-
-    if args.eval_imagenet:
-        print("Evaluating on ImageNet...")
-        for shot in args.shots:
-            scores = []
-            for seed, trial in zip(args.trial_seeds, range(args.num_trials)):
-                imagenet_score = evaluate_imagenet(
-                    model=flamingo,
-                    tokenizer=tokenizer,
-                    image_processor=image_processor,
-                    batch_size=args.batch_size,
-                    num_samples=args.num_samples,
-                    num_shots=shot,
-                    device=args.device,
-                    seed=seed,
-                    imagenet_root=args.imagenet_root,
-                )
-                print(
-                    f"Shots {shot} Trial {trial} " f"ImageNet score: {imagenet_score}"
-                )
-                scores.append(imagenet_score)
-            print(f"Shots {shot} Mean ImageNet score: {np.mean(scores)}")
-            results["imagenet"].append(
                 {"shots": shot, "trials": scores, "mean": np.mean(scores)}
             )
 
@@ -612,10 +533,10 @@ def evaluate_vqa(
     """
 
     full_dataset = VQADataset(
-        image_dir_path=image_dir_path,
-        question_path=questions_json_path,
-        annotations_path=annotations_json_path,
-        vqa_dataset=vqa_dataset,
+        # image_dir_path=image_dir_path,
+        # question_path=questions_json_path,
+        # annotations_path=annotations_json_path,
+        # vqa_dataset=vqa_dataset,
     )
 
     effective_num_shots = num_shots if num_shots > 0 else 2

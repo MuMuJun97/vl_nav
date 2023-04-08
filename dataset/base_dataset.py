@@ -24,8 +24,12 @@ class BaseDataset(torch_data.Dataset):
         self.logger = logger
         self.data_dir = Path(config.DATA_DIR).resolve()
         root_dir = Path(__file__).parent.parent.resolve()
-        self.soon_file = root_dir / self.config.SOON_DIR / self.config.SOON_SPLIT[split]
-        self.fr2r_file = root_dir / self.config.FR2R_DIR / self.config.FR2R_SPLIT[split]
+        try:
+            self.soon_file = root_dir / self.config.SOON_DIR / self.config.SOON_SPLIT[split]
+            self.fr2r_file = root_dir / self.config.FR2R_DIR / self.config.FR2R_SPLIT[split]
+        except Exception as e:
+            print(e)
+            print("[Error] args.split: {} is not true; select from: [{}]".format(split,self.config.SOON_SPLIT.keys()))
 
         # read Matterport3D navigableLocations
         self.navigable_loc = self.get_navigable_Locations()

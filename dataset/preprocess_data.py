@@ -153,7 +153,7 @@ def preprocess_soon(soon_file, navigable_loc):
 
 
 def preprocess_fr2r(fr2r_file, navigable_loc):
-    prompt_Option = 0
+    # prompt_Option = 0
     assert fr2r_file.exists()
     with open(str(fr2r_file),"r") as f:
         fr2r_data = json.load(f)

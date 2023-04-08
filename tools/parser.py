@@ -23,7 +23,7 @@ def read_args():
     parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
 
     ############# FLAMINGO #############
-    parser.add_argument("--vision_encoder_path", default="ViT-L-14", type=str)
+    parser.add_argument("--vision_encoder_path", default="ViT-B-16", type=str) # ViT-B-16, ViT-L-14
     parser.add_argument("--vision_encoder_pretrained", default="openai", type=str)
     # parser.add_argument("--lm_path", default="facebook/opt-125m", type=str) # mini language model
     parser.add_argument(
@@ -119,6 +119,7 @@ def read_args():
 
     args = parser.parse_args()
 
+    # local LLaMa-7B dir
     args.lm_path = args.tokenizer_path
 
     if args.offline:

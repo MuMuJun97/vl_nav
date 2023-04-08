@@ -41,9 +41,9 @@ class COCOFlickrDataset(Dataset):
 class VQADataset(Dataset):
     def __init__(
         self,
-        image_dir_path="/mmfs1/gscratch/efml/anasa2/data/vqav2/train2014/",
-        question_path="/mmfs1/gscratch/efml/anasa2/data/vqav2/v2_OpenEnded_mscoco_train2014_questions.json",
-        annotations_path="/mmfs1/gscratch/efml/anasa2/data/vqav2/v2_mscoco_train2014_annotations.json",
+        image_dir_path="/media/zlin/2CD830B2D8307C60/Dataset/vqa/train2014/",
+        question_path="/media/zlin/2CD830B2D8307C60/Dataset/vqa/v2_OpenEnded_mscoco_train2014_questions.json",
+        annotations_path="/media/zlin/2CD830B2D8307C60/Dataset/vqa/v2_mscoco_train2014_annotations.json",
         vqa_dataset="vqa",
     ):
         self.questions = json.load(open(question_path, "r"))["questions"]
