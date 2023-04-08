@@ -72,7 +72,7 @@ def check_checkpoint(args, ddp_model, optimizer, lr_scheduler):
 def train_one_epoch(
         args, model, epoch, data_loader, tokenizer, optimizer, lr_scheduler, device_id
 ):
-    NotImplementedError
+    raise NotImplementedError
 
 
 def main():
@@ -138,9 +138,9 @@ def main():
         print(f"Total training steps: {total_training_steps}")
 
     if args.lr_scheduler == "linear":
-        NotImplementedError
+        raise NotImplementedError
     elif args.lr_scheduler == "cosine":
-        NotImplementedError
+        raise NotImplementedError
     else:
         lr_scheduler = get_constant_schedule_with_warmup(
             optimizer, num_warmup_steps=args.warmup_steps
