@@ -261,7 +261,6 @@ class BaseDataset(torch_data.Dataset):
         return data_dict
 
     def __getitem__(self, index):
-        index += 40000
         item = self.data[index]
         scan = item['scan']
 
