@@ -33,7 +33,7 @@ def read_args():
     parser.add_argument(
         "--cross_attn_every_n_layers",
         type=int,
-        default=1,
+        default=4, # LLaMa-7B 4, OPT-1.3B 1
         help="how often to add a cross-attention layer after each transformer layer",
     )
     parser.add_argument(

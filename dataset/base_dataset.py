@@ -1,4 +1,5 @@
 import pickle
+import random
 from collections import defaultdict
 import numpy as np
 from .preprocess_data import preprocess_soon,preprocess_fr2r
@@ -182,8 +183,13 @@ class BaseDataset(torch_data.Dataset):
                 self._feature_store[key] = (view_fts, obj_fts, obj_attrs)
         return view_fts, obj_fts, obj_attrs
 
-    def generate_input_text(self,question,answer):
-        prompt = self.prompt # '<image>{text}<|endofchunk|>{tokenizer_eos_token}'
+    def generate_input_text(self,question,answer,view_mask):
+        # prompt = self.prompt # '<image>{text}{tokenizer_eos_token}'; "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
+        # "".join(["<image_{}>".format(i) for i in range(12)]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
+
+        # prompt = "".join(["<image>" if i==1 else "<PAD>" for i in view_mask]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
+        prompt = "".join(["<image>" if i==1 else "<image>" for i in view_mask]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
+
         question = " ".join(question.split())
         answer = " ".join(answer.split())
         text = "{question}{answer}".format(question=question,answer=answer)
@@ -193,21 +199,41 @@ class BaseDataset(torch_data.Dataset):
     def get_data_dict(self, item, scan, index):
         question = item['qa']['question']
         answer = item['qa']['answer']
+        view_mask = torch.ones(12)
 
         if index >= len(self.soon_data):
             vp_index = 0 # start viewpoint
+
+            if self.training:
+                vp_index = random.randint(0,len(item['path'])-1)
+
             # for fine-grained dataset: sub-path <-> sub-instruction
             viewpoint = item['path'][vp_index]
             view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint)
+            ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
 
-            ViewpointNext = item['navigable_pathViewIds'][vp_index] # next direction {0..11}, -1 means STOP
-
-            if ViewpointNext == -1:
-                answer = "You should stop."
-            else:
-                answer = answer.format(ViewID=ViewpointNext)
+            if 'ViewID' in question: # "I am going to direction {ViewID}, what do I do?",
+                if ViewpointNext == -1:
+                    question = "Question: The navigation will stop at the current location, what do I do?"
+                else:
+                    question = question.format(ViewID=ViewpointNext)
+                    view_mask = torch.zeros(12)
+                    view_mask[ViewpointNext] = 1
+            else: # "What is the next step I should take based on the instruction: {Instruction}?",
+                if ViewpointNext == -1:
+                    answer = "Answer: You should stop."
+                else:
+                    answer = answer.format(ViewID=ViewpointNext)
         else:
             vp_index = -1  # end viewpoint
+
+            if self.training:
+                prob = random.random()
+                if prob < 0.5:
+                    path_length = len(item['path'])
+                    if path_length >= 5:
+                        vp_index = random.randint(path_length-5,path_length-1)
+
             # for soon dataset: end viewpoint is the target location <-> instructions
             viewpoint = item['path'][vp_index] # item['path'][-1] is the goal location
             view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint)
@@ -215,9 +241,11 @@ class BaseDataset(torch_data.Dataset):
         input_text = self.generate_input_text(
             question=question,
             answer=answer,
+            view_mask=view_mask
         )
 
         if self.img_dir is not None:
+            view_fts[view_mask==0]=0
             data_dict = {
                 'input_text': input_text,
                 'imgs': view_fts,
@@ -233,10 +261,12 @@ class BaseDataset(torch_data.Dataset):
         return data_dict
 
     def __getitem__(self, index):
+        index += 40000
         item = self.data[index]
         scan = item['scan']
 
         data_dict = self.get_data_dict(item,scan,index)
+        data_dict['sample_idx'] = index
 
         return data_dict
 
@@ -250,7 +280,7 @@ class BaseDataset(torch_data.Dataset):
         ret = {}
         for key, val in data_dict.items():
             try:
-                if key in ['input_text']:
+                if key in ['input_text','sample_idx']:
                     ret[key] = val
                 elif key in ['imgs']:
                     ret[key] = torch.stack(val, 0)

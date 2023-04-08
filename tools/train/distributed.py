@@ -107,7 +107,7 @@ def init_distributed_device(args):
             args.rank = torch.distributed.get_rank()
         args.distributed = True
     else:
-        DistSingleGPU = True
+        DistSingleGPU = False
         if DistSingleGPU:
             # os.environ['MASTER_ADDR'] = '127.0.0.1'
             # from socket import socket

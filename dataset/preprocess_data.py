@@ -6,6 +6,23 @@ from copy import deepcopy
 import sys
 
 promptQAs = {
+    ############## SOON ##############
+    'soon_target': [
+        "What does the {target} look like?",  # 0
+        "What is the relationship between the {target} and other objects in the room?",  # 1
+        "Which room or area is the current location in?",  # 2
+        "What is the relationship between the current room and other neighboring rooms?",  # 3
+    ],
+    ############## Fine-grained R2R ##############
+    'R2R': [
+        "What is the next step I should take based on the instruction: {Instruction}?",
+        "I am going to direction {ViewID}, what do I do?",
+    ],
+    'R2RAnswer': [
+        "You should go in direction {ViewID}.",
+        "You can follow the navigation instruction: {Instruction}",
+    ],
+    ############## Other Options ##############
     'soon_qa': [
         "What are the attributes of the target object?",                                     # 0
         "What is the relationship between the target object and other objects in the room?", # 1
@@ -65,19 +82,20 @@ def preprocess_soon(soon_file, navigable_loc):
         soon_data = json.load(f)
     res_data = []
 
+    item_idx = 0
     pbar = tqdm(soon_data, desc="preprocess soon data:")
     for idx, _ in enumerate(pbar):
         for path in soon_data[idx]['path']:
             for instr in soon_data[idx]['instructions']:
                 item = dict()
                 item['path'] = path
-
+                item['sample_idx'] = item_idx
                 item['instruction'] = deepcopy(instr)
                 valid_bbox = []
                 for bbox in soon_data[idx]['bboxes']:
                     if bbox['image_id'] == path[-1]:
                         if bbox['obj_name'] is None:
-                            bbox['obj_name'] = 'None'
+                            bbox['obj_name'] = 'target'
                         valid_bbox.append(bbox)
                 item['bbox'] = random.choice(valid_bbox)
                 item['scan'] = item['bbox']['scan']
@@ -94,6 +112,7 @@ def preprocess_soon(soon_file, navigable_loc):
                 item['navigable_pathViewIds'] = navigable_pathViewIds
 
                 res_data.append(item)
+                item_idx += 1
         pbar.update(1)
 
     # TEST Visualization Paths
@@ -102,12 +121,21 @@ def preprocess_soon(soon_file, navigable_loc):
     #     mp3d_view(item_s)
 
     pbar = tqdm(res_data, desc="generate soon qa:")
-    for idx, _ in enumerate(pbar):
+    for idx, _item in enumerate(pbar):
         # for qa:
         # ridx = random.randint(0, 5) # random generate
-        ridx = idx % 5
-        question_text = "Question: {}".format(promptQAs['soon_qa'][ridx])
-        answer = "Answer: {}".format(res_data[idx]['instruction'][ridx])
+
+        # for soon with target object:
+        qa_lens = len(promptQAs['soon_target'])
+        ridx = idx % qa_lens
+        question_text = "Question: {}".format(
+            promptQAs['soon_target'][ridx].format(
+                target=_item['bbox']['obj_name']
+            )
+        )
+        answer = "Answer: {}".format(
+            _item['instruction'][ridx].format()
+        )
 
         # input_text = generate_qa(
         #     question=question_text,
@@ -130,11 +158,13 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
     with open(str(fr2r_file),"r") as f:
         fr2r_data = json.load(f)
     res_data = []
+    item_idx = 0
     pbar = tqdm(fr2r_data, desc="preprocess fine-grained data:")
     for idx, _ in enumerate(pbar):
         for j,chunk in enumerate(fr2r_data[idx]['chunk_view']):
             for k,sub_path in enumerate(chunk):
                 item = dict()
+                item['sample_idx'] = item_idx
                 item['scan'] = fr2r_data[idx]['scan']
                 item['fr2r'] = {
                     'distance': fr2r_data[idx]['distance'],
@@ -173,9 +203,24 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                 # else:
                 #     NotImplementedError
 
-                question_text = "Question: {}".format(promptQAs['image+text'][6])
-                question_text = question_text.replace('<Instruction>', item['qa']['sub_instr'])
-                answer = "Answer: {}".format(promptQAs['answer+viewpoint'][2])
+                qa_idx = item_idx % len(promptQAs['R2R'])
+                question_text = "Question: {}".format(
+                    promptQAs['R2R'][qa_idx]
+                )
+                if 'Instruction' in question_text:
+                    question_text = question_text.format(
+                        Instruction=item['qa']['sub_instr']
+                    )
+                    answer = "Answer: {}".format(promptQAs['R2RAnswer'][qa_idx])
+                elif 'ViewID' in question_text:
+                    answer = "Answer: {}".format(
+                        promptQAs['R2RAnswer'][qa_idx].format(
+                            Instruction=item['qa']['sub_instr']
+                        )
+                    )
+                else:
+                    raise NotImplementedError
+
 
                 # input_text = generate_qa(
                 #     question=question_text,
@@ -188,6 +233,7 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                 item['qa']['answer'] = answer
 
                 res_data.append(item)
+                item_idx += 1
 
     # # TEST Visualization Paths
     # from dataset.utils.visualize_mp3d import mp3d_view

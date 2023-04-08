@@ -100,7 +100,7 @@ def train_one_epoch(
 
     media_token_id = tokenizer("<image>", add_special_tokens=False)["input_ids"][-1]
     question_token_id = tokenizer("Question", add_special_tokens=False)["input_ids"][-1]
-    answer_token_id = tokenizer("Answer", add_special_tokens=False)["input_ids"][-1]
+    answer_token_id = tokenizer("?Answer", add_special_tokens=False)["input_ids"][-1]
     endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
         "input_ids"
     ][-1]
@@ -127,18 +127,20 @@ def train_one_epoch(
 
         #### FORWARD PASS ####
         if batch_dict.get('imgs',None) is not None:
+            # (B, T_img=12, F, C, H, W) with F=1
+            #  Batch_size, T_img: num_media=12, F: num_frames
             input_imgs = batch_dict['imgs'].to(device_id, dtype=cast_dtype, non_blocking=True)
-            use_local_vision = 'image'
-            input_imgs = input_imgs.unsqueeze(2).unsqueeze(2)
+            use_local_vision = 'none'
+            input_imgs = input_imgs.unsqueeze(2)
         elif batch_dict.get('img_feats',None) is not None:
             input_imgs = batch_dict['img_feats'].to(device_id, dtype=cast_dtype, non_blocking=True)
             use_local_vision = 'feature'
         else:
-            NotImplementedError
+            raise NotImplementedError
 
         input_text = tokenizer(
             batch_dict['input_text'],
-            max_length=64,
+            max_length=128,
             padding="longest",
             truncation="only_first",
             return_tensors="pt",
@@ -243,6 +245,7 @@ def main():
         dataset=train_dataset,
         batch_size=args.batch_size,
         dist=args.distributed,
+        workers=args.workers,
         training=True
     )
 
@@ -274,9 +277,9 @@ def main():
         print(f"Total training steps: {total_training_steps}")
 
     if args.lr_scheduler == "linear":
-        NotImplementedError
+        raise NotImplementedError
     elif args.lr_scheduler == "cosine":
-        NotImplementedError
+        raise NotImplementedError
     else:
         lr_scheduler = get_constant_schedule_with_warmup(
             optimizer, num_warmup_steps=args.warmup_steps

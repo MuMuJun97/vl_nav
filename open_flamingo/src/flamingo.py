@@ -64,6 +64,7 @@ class Flamingo(nn.Module):
         Args:
             vision_x (torch.Tensor): Vision input
                 shape (B, T_img, F, C, H, W) with F=1
+                Batch_size, T_img: num_media=12, F: num_frames
             lang_x (torch.Tensor): Language input ids
                 shape (B, T_txt)
             attention_mask (torch.Tensor, optional): Attention mask. Defaults to None.
@@ -188,7 +189,7 @@ class Flamingo(nn.Module):
         :return:
         """
         vision_x = vision_x.unsqueeze(1).unsqueeze(1)
-        NotImplementedError
+        raise NotImplementedError
 
     def _encode_multi_view_image(self, all_vision_x: torch.Tensor):
         """
