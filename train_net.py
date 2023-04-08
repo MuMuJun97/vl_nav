@@ -13,7 +13,8 @@ from open_flamingo import create_model_and_transforms
 from tools.parser import read_args,random_seed
 from tools.train.distributed import world_info_from_env, init_distributed_device
 from tools.train.train_utils import get_autocast,get_cast_dtype,AverageMeter
-
+import datetime
+from tensorboardX import SummaryWriter
 
 def get_grouped_params(model,args):
     params_with_wd, params_without_wd = [], []
@@ -39,24 +40,24 @@ def get_grouped_params(model,args):
         {"params": params_without_wd, "weight_decay": 0.0},
     ]
 
-def check_checkpoint(args,ddp_model,optimizer,lr_scheduler):
+def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
     # check if a checkpoint exists for this run
     if os.path.exists(f"{args.run_name}") and args.resume_from_checkpoint is None:
         checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
         if len(checkpoint_list) == 0:
-            print(f"Found no checkpoints for run {args.run_name}.")
+            logger.info(f"Found no checkpoints for run {args.run_name}.")
         else:
             args.resume_from_checkpoint = sorted(
                 checkpoint_list, key=lambda x: int(x.split("_")[-1].split(".")[0])
             )[-1]
-            print(
+            logger.info(
                 f"Found checkpoint {args.resume_from_checkpoint} for run {args.run_name}."
             )
     # TODO : resume from checkpoint
     resume_from_epoch = 0
     if args.resume_from_checkpoint is not None:
         if args.rank == 0:
-            print(f"Loading checkpoint from {args.resume_from_checkpoint}")
+            logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
         checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
         ddp_model.load_state_dict(checkpoint["model_state_dict"], False)
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -73,7 +74,7 @@ def get_checkpoint(model):
 
     return state_dict
 
-def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler):
+def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger):
     if args.rank == 0:
         if not os.path.exists(args.run_name):
             os.makedirs(args.run_name)
@@ -83,14 +84,14 @@ def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler):
             "optimizer_state_dict": optimizer.state_dict(),
             "lr_scheduler_state_dict": lr_scheduler.state_dict(),
         }
-        print(f"Saving checkpoint to {args.run_name}/checkpoint_{epoch}.pt")
+        logger.info(f"Saving checkpoint to {args.run_name}/checkpoint_{epoch}.pt")
         torch.save(checkpoint_dict, f"{args.run_name}/checkpoint_{epoch}.pt")
         if args.delete_previous_checkpoint:
             if epoch > 0:
                 os.remove(f"{args.run_name}/checkpoint_{epoch - 1}.pt")
 
 def train_one_epoch(
-        args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id
+        args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
 ):
     num_batches_per_epoch = data_loader.num_batches
     total_training_steps = num_batches_per_epoch * args.num_epochs
@@ -203,12 +204,20 @@ def train_one_epoch(
             step_time_m.update(time.time() - end)
             end = time.time()
 
+            if tb_log is not None:
+                try:
+                    cur_lr = float(optimizer.lr)
+                except:
+                    cur_lr = optimizer.param_groups[0]['lr']
+
+                tb_log.add_scalar('meta_data/learning_rate',cur_lr,num_steps)
+                tb_log.add_scalar('train/loss', loss.item(), num_steps)
+
         # Log loss to console
         if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
-            print(
+            logger.info(
                 f"Step {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. Loss: {loss.item():.3f}"
             )
-
 
 def main():
     args = read_args()
@@ -220,6 +229,16 @@ def main():
     args.enable_imgdataset = False if global_cfg.Dataset.get('IMG_DIR',None) is None else True
 
     device_id = init_distributed_device(args) # TODO multi-GPU training.
+    if args.rank == 0:
+        log_file = Path(args.run_name) / ('train_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+        from tools import common_utils
+        logger = common_utils.create_logger(log_file, rank=args.rank)
+        logger.info('**********************Start logging**********************')
+        gpu_list = os.environ['CUDA_VISIBLE_DEVICES'] if 'CUDA_VISIBLE_DEVICES' in os.environ.keys() else 'ALL'
+        logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
+        for key, val in vars(args).items():
+            logger.info('{:16} {}'.format(key, val))
+        common_utils.log_config_to_file(global_cfg, logger=logger)
 
     random_seed(args.seed)
 
@@ -262,19 +281,21 @@ def main():
         from torch.nn.parallel import DistributedDataParallel as DDP
         ddp_model = DDP(model, device_ids=[device_id])
         # args.batch_size: BATCH_SIZE_PER_GPU
-        print('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
+        logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
     else:
         total_gpus = 1
         ddp_model = model
-        print('Training with a single process')
+        logger.info('Training with a single process')
 
     optimizer = torch.optim.AdamW(get_grouped_params(ddp_model,args), lr=args.learning_rate)
 
     total_training_steps = (
       len(train_dataset) // (args.batch_size * args.world_size)
     ) * args.num_epochs
+
     if args.rank == 0:
-        print(f"Total training steps: {total_training_steps}")
+        logger.info(f"Total training steps: {total_training_steps}")
+        tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard'))
 
     if args.lr_scheduler == "linear":
         raise NotImplementedError
@@ -286,7 +307,7 @@ def main():
         )
 
     # TODO : check if a checkpoint exists for this run
-    resume_from_epoch = check_checkpoint(args,ddp_model,optimizer,lr_scheduler)
+    resume_from_epoch = check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger)
 
     ddp_model.train()
 
@@ -299,19 +320,20 @@ def main():
             tokenizer=tokenizer,
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
-            device_id=device_id
+            device_id=device_id,
+            tb_log=tb_log,
+            logger=logger
         )
 
         if args.rank == 0:
             # save checkpoint
-            save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler)
+            save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger)
 
     if args.rank == 0:
         # save final weights
         if not os.path.exists(args.run_name):
             os.makedirs(args.run_name)
         torch.save(get_checkpoint(ddp_model), f"{args.run_name}/final_weights.pt")
-
 
 if __name__ == "__main__":
     main()

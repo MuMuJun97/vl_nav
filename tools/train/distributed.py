@@ -138,4 +138,6 @@ def init_distributed_device(args):
         device = "cpu"
     args.device = device
     device = torch.device(device)
+    if args.distributed:
+        print('[INFO] distributed: True')
     return device

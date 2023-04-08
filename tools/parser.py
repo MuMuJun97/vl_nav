@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import os
 from tools.train.distributed import world_info_from_env
-
+from pathlib import Path
 
 def random_seed(seed=42, rank=0):
     torch.manual_seed(seed + rank)
@@ -12,13 +12,15 @@ def random_seed(seed=42, rank=0):
     random.seed(seed + rank)
 
 def read_args():
+    output_dir = Path(__file__).parent.parent.parent.resolve() / "vl_nav_output"
     parser = argparse.ArgumentParser()
 
     ############# DATASET #############
     parser.add_argument('--cfg_file', type=str, default="tools/cfgs/datasets/imgdatasets.yaml", help='dataset configs')
     parser.add_argument('--img_feats', type=str, default="vit_imagenet", help='dataset configs')
-    parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='dataset configs')
-    parser.add_argument('--split', type=str, default="train", help='dataset configs')
+    parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='object features')
+    parser.add_argument('--split', type=str, default="train", help='train, val, test')
+    parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
 
     ############# FLAMINGO #############
     parser.add_argument("--vision_encoder_path", default="ViT-L-14", type=str)
@@ -124,5 +126,7 @@ def read_args():
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
     args.local_rank, args.rank, args.world_size = world_info_from_env()
-
+    args.run_name = Path(args.output_dir) / args.run_name
+    args.run_name.mkdir(parents=True,exist_ok=True)
+    args.run_name = str(args.run_name)
     return args
