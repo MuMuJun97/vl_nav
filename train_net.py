@@ -293,9 +293,8 @@ def main():
       len(train_dataset) // (args.batch_size * args.world_size)
     ) * args.num_epochs
 
-    if args.rank == 0:
-        logger.info(f"Total training steps: {total_training_steps}")
-        tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard'))
+    logger.info(f"Total training steps: {total_training_steps}")
+    tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard'))
 
     if args.lr_scheduler == "linear":
         raise NotImplementedError
