@@ -229,16 +229,16 @@ def main():
     args.enable_imgdataset = False if global_cfg.Dataset.get('IMG_DIR',None) is None else True
 
     device_id = init_distributed_device(args) # TODO multi-GPU training.
-    if args.rank == 0:
-        log_file = Path(args.run_name) / ('train_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
-        from tools import common_utils
-        logger = common_utils.create_logger(log_file, rank=args.rank)
-        logger.info('**********************Start logging**********************')
-        gpu_list = os.environ['CUDA_VISIBLE_DEVICES'] if 'CUDA_VISIBLE_DEVICES' in os.environ.keys() else 'ALL'
-        logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
-        for key, val in vars(args).items():
-            logger.info('{:16} {}'.format(key, val))
-        common_utils.log_config_to_file(global_cfg, logger=logger)
+
+    log_file = Path(args.run_name) / ('train_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+    from tools import common_utils
+    logger = common_utils.create_logger(log_file, rank=args.rank)
+    logger.info('**********************Start logging**********************')
+    gpu_list = os.environ['CUDA_VISIBLE_DEVICES'] if 'CUDA_VISIBLE_DEVICES' in os.environ.keys() else 'ALL'
+    logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
+    for key, val in vars(args).items():
+        logger.info('{:16} {}'.format(key, val))
+    common_utils.log_config_to_file(global_cfg, logger=logger)
 
     random_seed(args.seed)
 
