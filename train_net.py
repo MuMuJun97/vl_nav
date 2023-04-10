@@ -54,7 +54,7 @@ def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
                 f"Found checkpoint {args.resume_from_checkpoint} for run {args.run_name}."
             )
     # TODO : resume from checkpoint
-    resume_from_epoch = 0
+    resume_from_epoch = global_step = 0
     if args.resume_from_checkpoint is not None:
         if args.rank == 0:
             logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
@@ -63,7 +63,8 @@ def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
         resume_from_epoch = checkpoint["epoch"] + 1
-    return resume_from_epoch
+        global_step = checkpoint["global_step"]
+    return resume_from_epoch, global_step
 
 def get_checkpoint(model):
     state_dict = model.state_dict()
@@ -74,12 +75,13 @@ def get_checkpoint(model):
 
     return state_dict
 
-def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger):
+def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step):
     if args.rank == 0:
         if not os.path.exists(args.run_name):
             os.makedirs(args.run_name)
         checkpoint_dict = {
             "epoch": epoch,
+            "global_step": global_step,
             "model_state_dict": get_checkpoint(ddp_model),
             "optimizer_state_dict": optimizer.state_dict(),
             "lr_scheduler_state_dict": lr_scheduler.state_dict(),
@@ -89,6 +91,22 @@ def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger):
         if args.delete_previous_checkpoint:
             if epoch > 0:
                 os.remove(f"{args.run_name}/checkpoint_{epoch - 1}.pt")
+
+# def train_one_epoch_debug(
+#         args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
+# ):
+#     num_batches_per_epoch = data_loader.num_batches
+#     total_training_steps = num_batches_per_epoch * args.num_epochs
+#     data_loader = range(len(data_loader))
+#     for num_steps, batch_dict in tqdm(
+#             enumerate(data_loader),
+#             disable=args.rank != 0,
+#             total=total_training_steps,
+#             initial=(epoch * num_batches_per_epoch)
+#     ):
+#         global_step = num_steps + epoch * num_batches_per_epoch
+#         tb_log.add_scalar('train/loss', global_step, global_step)
+#     return global_step
 
 def train_one_epoch(
         args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
@@ -210,14 +228,16 @@ def train_one_epoch(
                 except:
                     cur_lr = optimizer.param_groups[0]['lr']
 
-                tb_log.add_scalar('meta_data/learning_rate',cur_lr,num_steps)
-                tb_log.add_scalar('train/loss', loss.item(), num_steps)
+                tb_log.add_scalar('meta_data/learning_rate',cur_lr,global_step)
+                tb_log.add_scalar('train/loss', loss.item(), global_step)
 
         # Log loss to console
         if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
             logger.info(
                 f"Step {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. Loss: {loss.item():.3f}"
             )
+
+    return global_step
 
 def main():
     args = read_args()
@@ -306,12 +326,12 @@ def main():
         )
 
     # TODO : check if a checkpoint exists for this run
-    resume_from_epoch = check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger)
+    resume_from_epoch, global_step = check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger)
 
     ddp_model.train()
 
     for epoch in range(resume_from_epoch, args.num_epochs):
-        train_one_epoch(
+        global_step = train_one_epoch(
             args=args,
             model=ddp_model,
             epoch=epoch,
@@ -326,7 +346,7 @@ def main():
 
         if args.rank == 0:
             # save checkpoint
-            save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger)
+            save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step)
 
     if args.rank == 0:
         # save final weights
