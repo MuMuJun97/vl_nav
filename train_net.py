@@ -312,7 +312,7 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,
             )[0]
             loss_metric.accumulate(loss.data.item())
 
-    val_loss = loss_metric.average()
+    val_loss = loss_metric.average
     return val_loss
 
 def main():
