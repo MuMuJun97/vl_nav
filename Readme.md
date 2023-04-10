@@ -6,6 +6,7 @@
 ## 1. srun --partition=OpenDialogLab_S2 --gres=gpu:8 --ntasks-per-node=1 -n1 -c 64 --mem-per-cpu=40G --pty bash
 ## 2. srun --partition=OpenDialogLab_S2 --gres=gpu:1 --ntasks-per-node=1 -n1 -c 32 --mem-per-cpu=40G --pty bash
 ## 3. torchrun --nnodes=1 --nproc_per_node=8 train_net.py --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml --batch_size 2 --vision_encoder_path "ViT-B-16" --cross_attn_every_n_layers 8 --warmup_steps 1200 --num_epochs 20 --workers=4 --logging_steps 100
+## 4. torchrun --nnodes=1 --nproc_per_node=8 train_net.py --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml --batch_size 2 --vision_encoder_path "ViT-B-16" --cross_attn_every_n_layers 8 --warmup_steps 1200 --num_epochs 20 --workers=4 --logging_steps 1000
 torchrun --nnodes=1 --nproc_per_node=8 train_net.py \ 
   --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models \ # LLaMa-7B
   --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml \
