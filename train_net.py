@@ -424,7 +424,7 @@ def main():
 
         ############# MODEL-TRAIN #############
         ddp_model.train()
-        min_val_loss = 1e-10
+        min_val_loss = 1e+10
         for epoch in range(resume_from_epoch, args.num_epochs):
             global_step = train_one_epoch(
                 args=args,
