@@ -221,9 +221,9 @@ def main():
                     num_shots=shot,
                     device=args.device,
                     seed=seed,
-                    image_dir_path=args.vqav2_image_dir_path, # TODO
-                    questions_json_path=args.vqav2_questions_json_path,
-                    annotations_json_path=args.vqav2_annotations_json_path,
+                    image_dir_path="/media/zlin/2CD830B2D8307C60/Dataset/vqa/train2014/", # args.vqav2_image_dir_path, # TODO
+                    questions_json_path="/media/zlin/2CD830B2D8307C60/Dataset/vqa/v2_OpenEnded_mscoco_train2014_questions.json", # args.vqav2_questions_json_path,
+                    annotations_json_path="/media/zlin/2CD830B2D8307C60/Dataset/vqa/v2_mscoco_train2014_annotations.json", # args.vqav2_annotations_json_path,
                     vqa_dataset="vqa",
                 )
                 print(f"Shots {shot} Trial {trial} VQA score: {vqa_score}")
@@ -574,7 +574,7 @@ def evaluate_vqa(
                 num_shots=num_shots,
             )
             for i in range(len(batch))
-        ]
+        ]  # B,4(media_nums),1,(3,224,224)
 
         context_text = [
             get_context_text(
@@ -612,13 +612,13 @@ def evaluate_vqa(
 
         outputs = get_outputs(
             model=model,
-            batch_images=batch_images,
-            device=device,
+            batch_images=batch_images, # torch.Size([2, 5, 1, 3, 224, 224])
+            device=device, # 0
             attention_mask=attention_mask,
-            max_generation_length=max_generation_length,
-            num_beams=num_beams,
-            length_penalty=length_penalty,
-            input_ids=input_ids,
+            max_generation_length=20,# max_generation_length,
+            num_beams=num_beams, # torch.Size([2, 79])
+            length_penalty=length_penalty, # -2.0
+            input_ids=input_ids, # torch.Size([2, 79])
         )
 
         process_function = (

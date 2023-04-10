@@ -8,20 +8,22 @@ import sys
 promptQAs = {
     ############## SOON ##############
     'soon_target': [
-        "What does the {target} look like?",  # 0
-        "What is the relationship between the {target} and other objects in the room?",  # 1
-        "Which room or area is the current location in?",  # 2
-        "What is the relationship between the current room and other neighboring rooms?",  # 3
+        "what does the {target} look like?",  # 0
+        "what is the relationship between the {target} and other objects in the room?",  # 1
+        "which room or area is the current location in?",  # 2
+        "what is the relationship between the current room and other neighboring rooms?",  # 3
     ],
     ############## Fine-grained R2R ##############
     'R2R': [
-        "What is the next step I should take based on the instruction: {Instruction}?",
+        "what is the next step I should take based on the instruction: {Instruction}?",
         "I am going to direction {ViewID}, what do I do?",
     ],
     'R2RAnswer': [
-        "You should go in direction {ViewID}.",
-        "You can follow the navigation instruction: {Instruction}",
+        "you should go in direction {ViewID}.",
+        "you can follow the navigation instruction: {Instruction}",
     ],
+    ############## Other Options ##############
+    ############## Other Options ##############
     ############## Other Options ##############
     'soon_qa': [
         "What are the attributes of the target object?",                                     # 0
@@ -128,12 +130,12 @@ def preprocess_soon(soon_file, navigable_loc):
         # for soon with target object:
         qa_lens = len(promptQAs['soon_target'])
         ridx = idx % qa_lens
-        question_text = "Question: {}".format(
+        question_text = "Question:{}".format(
             promptQAs['soon_target'][ridx].format(
                 target=_item['bbox']['obj_name']
             )
         )
-        answer = "Answer: {}".format(
+        answer = "Answer:{}".format(
             _item['instruction'][ridx].format()
         )
 
@@ -204,16 +206,16 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                 #     NotImplementedError
 
                 qa_idx = item_idx % len(promptQAs['R2R'])
-                question_text = "Question: {}".format(
+                question_text = "Question:{}".format(
                     promptQAs['R2R'][qa_idx]
                 )
                 if 'Instruction' in question_text:
                     question_text = question_text.format(
                         Instruction=item['qa']['sub_instr']
                     )
-                    answer = "Answer: {}".format(promptQAs['R2RAnswer'][qa_idx])
+                    answer = "Answer:{}".format(promptQAs['R2RAnswer'][qa_idx])
                 elif 'ViewID' in question_text:
-                    answer = "Answer: {}".format(
+                    answer = "Answer:{}".format(
                         promptQAs['R2RAnswer'][qa_idx].format(
                             Instruction=item['qa']['sub_instr']
                         )

@@ -21,6 +21,7 @@ def read_args():
     parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='object features')
     parser.add_argument('--split', type=str, default="train", help='train, val, test')
     parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
+    parser.add_argument('--trainval_step', type=int, default=1, help='train and eval step')
 
     ############# FLAMINGO #############
     parser.add_argument("--vision_encoder_path", default="ViT-B-16", type=str) # ViT-B-16, ViT-L-14
@@ -35,7 +36,7 @@ def read_args():
     parser.add_argument(
         "--cross_attn_every_n_layers",
         type=int,
-        default=4, # LLaMa-7B 4, OPT-1.3B 1
+        default=16, # LLaMa-7B cross_attn_every_n_layers=4; OPT-1.3B 1;
         help="how often to add a cross-attention layer after each transformer layer",
     )
     parser.add_argument(

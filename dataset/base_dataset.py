@@ -187,17 +187,32 @@ class BaseDataset(torch_data.Dataset):
                 self._feature_store[key] = (view_fts, obj_fts, obj_attrs)
         return view_fts, obj_fts, obj_attrs
 
-    def generate_input_text(self,question,answer,view_mask):
+    def generate_input_text(self,question,answer,view_mask,training):
+        # __comment__
         # prompt = self.prompt # '<image>{text}{tokenizer_eos_token}'; "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
         # "".join(["<image_{}>".format(i) for i in range(12)]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
 
+        # __comment__
         # prompt = "".join(["<image>" if i==1 else "<PAD>" for i in view_mask]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
-        prompt = "".join(["<image>" if i==1 else "<image>" for i in view_mask]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
+
+        # __comment__
+        # remove "<|endofchunk|>": for get index of all endofchunk tokens in the sequence
+        prompt = "".join(["<image>" if i==1 else "<image>" for i in view_mask]) + "{text}{tokenizer_eos_token}"
 
         question = " ".join(question.split())
         answer = " ".join(answer.split())
-        text = "{question}{answer}".format(question=question,answer=answer)
-        input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
+        if self.training:
+            text = "{question}{answer}".format(question=question,answer=answer)
+            input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
+        else:
+            # TODO for text generation
+            # text = "{question}{answer}".format(question=question,answer="Answer:")
+            # input_text = prompt.format(text=text, tokenizer_eos_token="")
+
+            # for validation loss
+            text = "{question}{answer}".format(question=question,answer=answer)
+            input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
+
         return input_text
 
     def get_data_dict(self, item, scan, index):
@@ -218,14 +233,14 @@ class BaseDataset(torch_data.Dataset):
 
             if 'ViewID' in question: # "I am going to direction {ViewID}, what do I do?",
                 if ViewpointNext == -1:
-                    question = "Question: The navigation will stop at the current location, what do I do?"
+                    question = "Question:the navigation will stop at the current location, what do I do?"
                 else:
                     question = question.format(ViewID=ViewpointNext)
                     view_mask = torch.zeros(12)
                     view_mask[ViewpointNext] = 1
             else: # "What is the next step I should take based on the instruction: {Instruction}?",
                 if ViewpointNext == -1:
-                    answer = "Answer: You should stop."
+                    answer = "Answer:you should stop."
                 else:
                     answer = answer.format(ViewID=ViewpointNext)
         else:
@@ -245,7 +260,8 @@ class BaseDataset(torch_data.Dataset):
         input_text = self.generate_input_text(
             question=question,
             answer=answer,
-            view_mask=view_mask
+            view_mask=view_mask,
+            training=self.training
         )
 
         if self.img_dir is not None:

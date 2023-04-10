@@ -56,3 +56,8 @@ Dataset:
     image_size: [224,224]
     path: "ViT-L-14"
     pretrained: "openai"
+
+Inference:
+  max_new_tokens: 20 # max generation length when inference
+  num_beams: 3
+  length_penalty: -2.0

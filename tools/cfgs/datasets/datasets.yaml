@@ -50,3 +50,8 @@ Dataset:
 
     prompt: "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
     # prompt_MV: <image_0><image_1><image_2><image_3><image_4><image_5><image_6><image_7><image_8><image_9><image_10><image_11>{text}<|endofchunk|>{tokenizer_eos_token}
+
+Inference:
+  max_new_tokens: 20 # max generation length when inference
+  num_beams: 3
+  length_penalty: -2.0
