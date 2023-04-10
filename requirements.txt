@@ -3,7 +3,6 @@ easydict==1.10
 einops==0.6.0
 einops_exts==0.0.4
 h5py==3.6.0
-horovod==0.27.0
 inflection==0.5.1
 more_itertools==9.1.0
 nltk==3.7
@@ -17,5 +16,3 @@ torch==2.0.0
 torchvision==0.15.1
 tqdm==4.64.0
 transformers==4.27.4
-wandb==0.14.2
-webdataset==0.2.48

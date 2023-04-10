@@ -408,7 +408,7 @@ def main():
                                ) * args.num_epochs
 
         logger.info(f"Total training steps: {total_training_steps}")
-        tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard'))
+        tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard')) if args.rank == 0 else None
 
         if args.lr_scheduler == "linear":
             raise NotImplementedError
