@@ -68,8 +68,8 @@ def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
             logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
         checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
         ddp_model.load_state_dict(checkpoint["model_state_dict"], False)
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"]) if optimizer is not None else None
+        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"]) if lr_scheduler is not None else None
         resume_from_epoch = checkpoint["epoch"] + 1
         global_step = checkpoint["global_step"]
     return resume_from_epoch, global_step
@@ -462,6 +462,32 @@ def main():
             torch.save(get_checkpoint(ddp_model), f"{args.run_name}/final_weights.pt")
 
     elif 'val' in args.split: # Single-GPU Val
+        print(f"Start running training on rank {args.rank}.")
+
+        # args.rank: global rank.
+        total_gpus = torch.cuda.device_count()
+        device_id = args.rank % total_gpus
+        model = model.to(device_id)
+
+        if args.distributed:
+            from torch.nn.parallel import DistributedDataParallel as DDP
+            ddp_model = DDP(model, device_ids=[device_id])
+            # args.batch_size: BATCH_SIZE_PER_GPU
+            logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
+        else:
+            total_gpus = 1
+            ddp_model = model
+            logger.info('Training with a single process')
+
+        # TODO : check if a checkpoint exists for this run
+        resume_from_epoch, global_step = check_checkpoint(
+            args,
+            ddp_model,
+            optimizer=None,
+            lr_scheduler=None,
+            logger=logger
+        )
+
         if not args.text_generate:
 
             logger.info("**************************** Validation: {} ****************************".format(args.split))
