@@ -6,6 +6,26 @@ from copy import deepcopy
 import sys
 
 promptQAs = {
+    ############## Task Descriptions ##############
+    'task_description': {
+      "common": "Imagine you are navigating an indoor building with the help of an embodied agent. "
+                "You can ask the agent for its current viewpoint, "
+                "and provide a navigation language instruction to receive the next direction you should go. "
+                "Additionally, you can ask the agent about any object attributes "
+                "and positional relationships in the current room to gain a better understanding of the environment. "
+                "The agent will provide 12 discrete heading view images of the current location, "
+                "covering a 360-degree panorama, and output the next direction "
+                "or whether to stop based on the navigation instruction provided.",
+      "simple": "Task: Help navigate an indoor building using an embodied agent. "
+                "At each location, you have access to 12 view images covering a 360-degree panorama. "
+                "Given a navigation instruction, provide the next direction to take or indicate to stop.",
+      "middle": "Task Description: Navigate an indoor building with the help of an embodied agent. "
+                "Ask the agent for its current viewpoint and receive the next direction to go "
+                "based on a navigation language instruction. "
+                "Get information about object attributes and positional relationships in the current room "
+                "from the agent's 12 discrete heading view images. "
+                "The agent will also provide the option to stop if necessary.",
+    },
     ############## SOON ##############
     'soon_target': [
         "what does the {target} look like?",  # 0

@@ -47,9 +47,10 @@ Dataset:
   # tokenizer.eos_token
   tokenizer:
     eos_token: '</s>'
-
-    prompt: "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
-    # prompt_MV: <image_0><image_1><image_2><image_3><image_4><image_5><image_6><image_7><image_8><image_9><image_10><image_11>{text}<|endofchunk|>{tokenizer_eos_token}
+    max_length: 256
+    prompt:
+      task_description_type: "common"
+      template: "{task_description}Environment:{environment}{question}{answer}{tokenizer_eos_token}"
 
 Inference:
   max_new_tokens: 20 # max generation length when inference

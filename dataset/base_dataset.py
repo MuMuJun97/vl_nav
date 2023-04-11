@@ -2,7 +2,7 @@ import pickle
 import random
 from collections import defaultdict
 import numpy as np
-from .preprocess_data import preprocess_soon,preprocess_fr2r
+from .preprocess_data import preprocess_soon,preprocess_fr2r,promptQAs
 from tools.train import common_utils
 from PIL import Image
 import torch
@@ -48,7 +48,6 @@ class BaseDataset(torch_data.Dataset):
 
         # '</s>'
         self.tokenizer_eos_token = self.config.tokenizer.eos_token
-        # "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
         self.prompt = self.config.tokenizer.prompt
 
         self.data = self.soon_data + self.fr2r_data
@@ -187,9 +186,9 @@ class BaseDataset(torch_data.Dataset):
                 self._feature_store[key] = (view_fts, obj_fts, obj_attrs)
         return view_fts, obj_fts, obj_attrs
 
-    def generate_input_text(self,question,answer,view_mask,training):
+    def generate_input_text(self,question,answer,view_mask):
         # __comment__
-        # prompt = self.prompt # '<image>{text}{tokenizer_eos_token}'; "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
+        # prompt = '<image>{text}{tokenizer_eos_token}'; "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
         # "".join(["<image_{}>".format(i) for i in range(12)]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
 
         # __comment__
@@ -197,21 +196,36 @@ class BaseDataset(torch_data.Dataset):
 
         # __comment__
         # remove "<|endofchunk|>": for get index of all endofchunk tokens in the sequence
-        prompt = "".join(["<image>" if i==1 else "<image>" for i in view_mask]) + "{text}{tokenizer_eos_token}"
+
+        task_desc_type = self.prompt.task_description_type
+        task_description = promptQAs['task_description'][task_desc_type]
+        prompt = self.prompt.template
+
+        environment = "".join(["<image>" if i==1 else "<image>" for i in view_mask])
 
         question = " ".join(question.split())
         answer = " ".join(answer.split())
         if self.training:
-            text = "{question}{answer}".format(question=question,answer=answer)
-            input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
+            input_text = prompt.format(
+                task_description=task_description,
+                environment=environment,
+                question=question,
+                answer=answer,
+                tokenizer_eos_token=self.tokenizer_eos_token
+            )
         else:
             # TODO for text generation
             # text = "{question}{answer}".format(question=question,answer="Answer:")
             # input_text = prompt.format(text=text, tokenizer_eos_token="")
 
             # for validation loss
-            text = "{question}{answer}".format(question=question,answer=answer)
-            input_text = prompt.format(text=text, tokenizer_eos_token=self.tokenizer_eos_token)
+            input_text = prompt.format(
+                task_description=task_description,
+                environment=environment,
+                question=question,
+                answer=answer,
+                tokenizer_eos_token=self.tokenizer_eos_token
+            )
 
         return input_text
 
@@ -261,7 +275,6 @@ class BaseDataset(torch_data.Dataset):
             question=question,
             answer=answer,
             view_mask=view_mask,
-            training=self.training
         )
 
         if self.img_dir is not None:
