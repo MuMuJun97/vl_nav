@@ -410,19 +410,18 @@ def main():
         ddp_model.train()
         min_val_loss = 1e+10
         for epoch in range(resume_from_epoch, args.num_epochs):
-            if False:
-                global_step = train_one_epoch(
-                    args=args,
-                    model=ddp_model,
-                    epoch=epoch,
-                    data_loader=dataloader,
-                    tokenizer=tokenizer,
-                    optimizer=optimizer,
-                    lr_scheduler=lr_scheduler,
-                    device_id=device_id,
-                    tb_log=tb_log,
-                    logger=logger
-                )
+            global_step = train_one_epoch(
+                args=args,
+                model=ddp_model,
+                epoch=epoch,
+                data_loader=dataloader,
+                tokenizer=tokenizer,
+                optimizer=optimizer,
+                lr_scheduler=lr_scheduler,
+                device_id=device_id,
+                tb_log=tb_log,
+                logger=logger
+            )
 
             if args.trainval_step > 0:
                 if epoch % args.trainval_step == 0:
