@@ -499,7 +499,7 @@ def main():
                 global_cfg=global_cfg,
                 model=model,
                 tokenizer=tokenizer,
-                device_id=device_id.index
+                device_id=device_id
             )
         else:
 
@@ -512,7 +512,7 @@ def main():
                 global_cfg=global_cfg,
                 model=model,
                 tokenizer=tokenizer,
-                device_id=device_id.index
+                device_id=device_id
             )
             val_pred_file = Path(args.run_name) / (
                 'val_pred_{}.json'.format(
