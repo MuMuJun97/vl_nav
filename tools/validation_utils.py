@@ -136,6 +136,8 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
     @param tokenizer:
     @param device_id: 0
     """
+    args.split == 'train'
+    args.generate_nums = 40
     dataset = BaseDataset(
         config=global_cfg.Dataset,
         split=args.split,
@@ -155,6 +157,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
     model.eval()
     predictions = dict()
     loss_metric = Metrics()
+    pred_num = 0
 
     with torch.no_grad():
         for idx, batch_dict in tqdm(
@@ -163,6 +166,10 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
                 disable=args.rank != 0,
                 desc="validation {}:".format(args.split)
         ):
+            pred_num += 1
+            if pred_num > args.generate_nums:
+                break
+
             #### FORWARD PASS ####
             if batch_dict.get('imgs', None) is not None:
                 # (B, T_img=12, F, C, H, W) with F=1
