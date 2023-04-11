@@ -136,7 +136,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
     @param tokenizer:
     @param device_id: 0
     """
-    args.split == 'train'
+    args.split = 'train'
     args.generate_nums = 40
     dataset = BaseDataset(
         config=global_cfg.Dataset,
