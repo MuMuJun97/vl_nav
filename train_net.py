@@ -271,19 +271,19 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb
             )
             loss_metric.accumulate(loss.data.item())
 
-            cur_preds = inference_text_generation(
-                args=args,
-                model=model,
-                batch_dict=batch_dict,
-                tokenizer=tokenizer,
-                global_cfg=global_cfg,
-                device_id=device_id,
-                cast_dtype=cast_dtype
-            )
-            predictions.update(cur_preds)
+            # cur_preds = inference_text_generation(
+            #     args=args,
+            #     model=model,
+            #     batch_dict=batch_dict,
+            #     tokenizer=tokenizer,
+            #     global_cfg=global_cfg,
+            #     device_id=device_id,
+            #     cast_dtype=cast_dtype
+            # )
+            # predictions.update(cur_preds)
 
     val_loss = loss_metric.average
-    return val_loss,predictions
+    return val_loss,None
 
 def main():
     args = read_args()
@@ -436,13 +436,13 @@ def main():
                         tb_log=tb_log,
                         logger=logger
                     )
-                    val_pred_file = Path(args.run_name) / (
-                                'val_pred_{}-{}.json'.format(
-                                    datetime.datetime.now().strftime('%Y%m%d-%H%M%S'),
-                                    epoch
-                                ))
-                    with open(str(val_pred_file),'w') as f:
-                        json.dump(val_pred_dict,f,indent=2)
+                    # val_pred_file = Path(args.run_name) / (
+                    #             'val_pred_{}-{}.json'.format(
+                    #                 datetime.datetime.now().strftime('%Y%m%d-%H%M%S'),
+                    #                 epoch
+                    #             ))
+                    # with open(str(val_pred_file),'w') as f:
+                    #     json.dump(val_pred_dict,f,indent=2)
 
                     logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
                 else:
