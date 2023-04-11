@@ -442,7 +442,7 @@ def main():
                                     epoch
                                 ))
                     with open(str(val_pred_file),'w') as f:
-                        json.dump(val_pred_file,f,indent=2)
+                        json.dump(val_pred_dict,f,indent=2)
 
                     logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
                 else:
