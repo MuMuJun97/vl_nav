@@ -450,7 +450,7 @@ def main():
             else:
                 val_loss = 0
 
-            if args.rank == 0 and min_val_loss >= val_loss:
+            if args.rank == 0: #and min_val_loss >= val_loss:
                 min_val_loss = val_loss
                 # save checkpoint
                 save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step, min_val_loss)
