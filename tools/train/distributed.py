@@ -107,16 +107,16 @@ def init_distributed_device(args):
             args.rank = torch.distributed.get_rank()
         args.distributed = True
     else:
-        DistSingleGPU = False
+        DistSingleGPU = True
         if DistSingleGPU:
-            # os.environ['MASTER_ADDR'] = '127.0.0.1'
-            # from socket import socket
-            # with socket() as s:
-            #     s.bind(('', 0))
-            #     free_port = str(s.getsockname()[1])
-            # os.environ['MASTER_PORT'] = free_port
-            # # TODO 注释此处 for debug
-            # # needed to run on single gpu
+            os.environ['MASTER_ADDR'] = '127.0.0.1'
+            from socket import socket
+            with socket() as s:
+                s.bind(('', 0))
+                free_port = str(s.getsockname()[1])
+            os.environ['MASTER_PORT'] = free_port
+            # TODO 注释此处 for debug
+            # needed to run on single gpu
             torch.distributed.init_process_group(
                 backend=args.dist_backend,
                 init_method=args.dist_url,
@@ -124,6 +124,7 @@ def init_distributed_device(args):
                 rank=0,
             )
             print('[INFO] single gpu run')
+            args.distributed = True
         else:
             args.distributed = False
             print('[INFO] single gpu: Not distributed')

@@ -48,7 +48,7 @@ def get_grouped_params(model,args):
         {"params": params_without_wd, "weight_decay": 0.0},
     ]
 
-def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
+def check_checkpoint(args,model,optimizer,lr_scheduler,logger):
     # check if a checkpoint exists for this run
     if os.path.exists(f"{args.run_name}") and args.resume_from_checkpoint is None:
         checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
@@ -67,19 +67,48 @@ def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
         if args.rank == 0:
             logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
         checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
-        ddp_model.load_state_dict(checkpoint["model_state_dict"], False)
+
+        model_state_dict = model.state_dict()
+        state_disk = {k.replace('module.',''):v for k,v in checkpoint["model_state_dict"].items()}
+
+        update_model_state = {}
+        for key, val in state_disk.items():
+            if key in model_state_dict and model_state_dict[key].shape == val.shape:
+                update_model_state[key] = val
+            else:
+                logger.info(
+                    'Ignore weight %s: %s' % (key, str(val.shape))
+                )
+        model.load_state_dict(update_model_state,strict=False)
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
         resume_from_epoch = checkpoint["epoch"] + 1
         global_step = checkpoint["global_step"]
     return resume_from_epoch, global_step
 
-def get_checkpoint(model):
-    state_dict = model.state_dict()
+def model_state_to_cpu(model_state):
+    model_state_cpu = type(model_state)()  # ordered dict
+    for key, val in model_state.items():
+        model_state_cpu[key] = val.cpu()
+    return model_state_cpu
 
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
-            del state_dict[name]
+def get_checkpoint(model, del_grad=True):
+    if model is not None:
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            state_dict = model_state_to_cpu(model.module.state_dict())
+            if del_grad:
+                for name, p in model.named_parameters():
+                    sn = name.replace('module.', '')
+                    if not p.requires_grad:
+                        del state_dict[sn]
+        else:
+            state_dict = model.state_dict()
+            if del_grad:
+                for name, p in model.named_parameters():
+                    if not p.requires_grad:
+                        del state_dict[name]
+    else:
+        state_dict = None
 
     return state_dict
 
@@ -173,7 +202,7 @@ def train_one_epoch(
 
         labels = input_ids.clone()
         labels[labels == tokenizer.pad_token_id] = -100
-        # labels[:, 0] = -100
+        labels[:, 0] = -100
         labels[labels == args.media_token_id] = -100
 
         # question->answer:
@@ -375,25 +404,7 @@ def main():
         device_id = args.rank % total_gpus
         model = model.to(device_id)
 
-        if args.distributed:
-            from torch.nn.parallel import DistributedDataParallel as DDP
-            ddp_model = DDP(model, device_ids=[device_id])
-            # args.batch_size: BATCH_SIZE_PER_GPU
-            logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
-        else:
-            total_gpus = 1
-            ddp_model = model
-            logger.info('Training with a single process')
-
-        optimizer = torch.optim.AdamW(get_grouped_params(ddp_model, args), lr=args.learning_rate)
-
-        total_training_steps = (
-                                       len(dataset) // (args.batch_size * args.world_size)
-                               ) * args.num_epochs
-
-        logger.info(f"Total training steps: {total_training_steps}")
-        tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard')) if args.rank == 0 else None
-
+        optimizer = torch.optim.AdamW(get_grouped_params(model, args), lr=args.learning_rate)
         if args.lr_scheduler == "linear":
             raise NotImplementedError
         elif args.lr_scheduler == "cosine":
@@ -404,12 +415,30 @@ def main():
             )
 
         # TODO : check if a checkpoint exists for this run
-        resume_from_epoch, global_step = check_checkpoint(args, ddp_model, optimizer, lr_scheduler, logger)
+        resume_from_epoch, global_step = check_checkpoint(args, model, optimizer, lr_scheduler, logger)
+
+        if args.distributed:
+            from torch.nn.parallel import DistributedDataParallel as DDP
+            ddp_model = DDP(model, device_ids=[device_id])
+            # args.batch_size: BATCH_SIZE_PER_GPU
+            logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
+        else:
+            total_gpus = 1
+            ddp_model = model
+            logger.info('Training with a single process')
+
+        total_training_steps = (
+                                       len(dataset) // (args.batch_size * args.world_size)
+                               ) * args.num_epochs
+
+        logger.info(f"Total training steps: {total_training_steps}")
+        tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard')) if args.rank == 0 else None
 
         ############# MODEL-TRAIN #############
         ddp_model.train()
         min_val_loss = 1e+10
         for epoch in range(resume_from_epoch, args.num_epochs):
+
             global_step = train_one_epoch(
                 args=args,
                 model=ddp_model,

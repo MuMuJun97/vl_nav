@@ -360,10 +360,11 @@ def build_dataloader(dataset,batch_size,dist=False,training=True,workers=0,seed=
     else:
         sampler = None
 
-    if dist:
-        shuffle = (sampler is None) and training
-    else:
-        shuffle = False
+    # if dist:
+    #     shuffle = (sampler is None) and training
+    # else:
+    #     shuffle = False
+    shuffle = (sampler is None) and training
 
     dataloader = DataLoader(
         dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,
