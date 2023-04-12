@@ -173,7 +173,7 @@ def train_one_epoch(
 
         labels = input_ids.clone()
         labels[labels == tokenizer.pad_token_id] = -100
-        labels[:, 0] = -100
+        # labels[:, 0] = -100
         labels[labels == args.media_token_id] = -100
 
         # question->answer:
