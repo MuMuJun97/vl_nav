@@ -173,6 +173,81 @@ def preprocess_soon(soon_file, navigable_loc):
         pbar.update(1)
     return res_data
 
+def preprocess_soon_v1(soon_file, navigable_loc):
+    assert soon_file.exists()
+    with open(str(soon_file), "r") as f:
+        soon_data = json.load(f)
+    res_data = []
+
+    item_idx = 0
+    pbar = tqdm(soon_data, desc="preprocess soon data:")
+    for idx, _ in enumerate(pbar):
+        for path in soon_data[idx]['path'][:len(promptQAs['soon_target'])]:
+            for instr in soon_data[idx]['instructions']:
+                item = dict()
+                item['path'] = path
+                item['sample_idx'] = item_idx
+                item['instruction'] = deepcopy(instr)
+                valid_bbox = []
+                for bbox in soon_data[idx]['bboxes']:
+                    if bbox['image_id'] == path[-1]:
+                        if bbox['obj_name'] is None:
+                            bbox['obj_name'] = 'target'
+                        valid_bbox.append(bbox)
+                item['bbox'] = random.choice(valid_bbox)
+                item['scan'] = item['bbox']['scan']
+                item['instruction'].insert(-1, item['bbox']['obj_name'])
+
+                # navigable_pathViewIds = [0] # start_view=0
+                navigable_pathViewIds = []
+                for curIx in range(len(item['path'])-1):
+                    curNode = item['path'][curIx]
+                    nextNode = item['path'][curIx+1]
+                    nextViewId = navigable_loc[item['scan']][curNode][nextNode]['pointId']
+                    navigable_pathViewIds.append(nextViewId)
+                navigable_pathViewIds.append(-1)  # end_view=-1
+                item['navigable_pathViewIds'] = navigable_pathViewIds
+
+                res_data.append(item)
+                item_idx += 1
+        pbar.update(1)
+
+    # TEST Visualization Paths
+    # from dataset.utils.visualize_mp3d import mp3d_view
+    # for item_s in res_data[:100]:
+    #     mp3d_view(item_s)
+
+    pbar = tqdm(res_data, desc="generate soon qa:")
+    for idx, _item in enumerate(pbar):
+        # for qa:
+        # ridx = random.randint(0, 5) # random generate
+
+        # for soon with target object:
+        qa_lens = len(promptQAs['soon_target'])
+        ridx = idx % qa_lens
+        question_text = "Question:{}".format(
+            promptQAs['soon_target'][ridx].format(
+                target=_item['bbox']['obj_name']
+            )
+        )
+        answer = "Answer:{}".format(
+            _item['instruction'][ridx].format()
+        )
+
+        # input_text = generate_qa(
+        #     question=question_text,
+        #     answer=answer,
+        #     tokenizer_eos_token=tokenizer_eos_token
+        # )
+
+        res_data[idx]['qa'] = dict()
+        res_data[idx]['qa']['question'] = question_text
+        res_data[idx]['qa']['answer'] = answer
+        res_data[idx]['qa']['full_instr'] = res_data[idx]['instruction'][4]
+
+        pbar.update(1)
+    return res_data
+
 
 def preprocess_fr2r(fr2r_file, navigable_loc):
     # prompt_Option = 0

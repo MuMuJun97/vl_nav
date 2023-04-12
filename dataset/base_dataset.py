@@ -2,7 +2,7 @@ import pickle
 import random
 from collections import defaultdict
 import numpy as np
-from .preprocess_data import preprocess_soon,preprocess_fr2r,promptQAs
+from .preprocess_data import preprocess_soon_v1,preprocess_fr2r,promptQAs
 from tools.train import common_utils
 from PIL import Image
 import torch
@@ -35,7 +35,7 @@ class BaseDataset(torch_data.Dataset):
         self.navigable_loc = self.get_navigable_Locations()
 
         # read SOON data
-        self.soon_data = preprocess_soon(
+        self.soon_data = preprocess_soon_v1(
             self.soon_file,
             self.navigable_loc,
         )
