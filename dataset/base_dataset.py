@@ -265,12 +265,12 @@ class BaseDataset(torch_data.Dataset):
         else:
             vp_index = -1  # end viewpoint
 
-            if self.training:
-                prob = random.random()
-                if prob < 0.5:
-                    path_length = len(item['path'])
-                    if path_length >= 5:
-                        vp_index = random.randint(path_length-5,path_length-1)
+            # if self.training:
+            #     prob = random.random()
+            #     if prob < 0.5:
+            #         path_length = len(item['path'])
+            #         if path_length >= 3:
+            #             vp_index = random.randint(path_length-2,path_length-1)
 
             # for soon dataset: end viewpoint is the target location <-> instructions
             viewpoint = item['path'][vp_index] # item['path'][-1] is the goal location

@@ -67,10 +67,12 @@ def create_model_and_transforms(
     lang_encoder.set_decoder_layers_attr_name(decoder_layers_attr_name)
     lang_encoder.resize_token_embeddings(len(text_tokenizer))
 
+    # TODO ? endofchunk: how to modify?
     model = Flamingo(
         vision_encoder,
         lang_encoder,
-        text_tokenizer.encode("<|endofchunk|>")[-1],
+        text_tokenizer.encode("</s>")[-1],
+        # text_tokenizer.encode("<|endofchunk|>")[-1],
         text_tokenizer.encode("<image>")[-1],
         vis_dim=open_clip.get_model_config(clip_vision_encoder_path)["vision_cfg"][
             "width"
