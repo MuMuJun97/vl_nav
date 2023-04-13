@@ -136,19 +136,18 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
     @param tokenizer:
     @param device_id: 0
     """
-    args.split = 'train'
-    args.generate_nums = 40
     dataset = BaseDataset(
         config=global_cfg.Dataset,
-        split=args.split,
-        training=False if args.split != 'train' else True
+        split=args.generate_split,
+        training=False, # False if args.generate_split != 'train' else True
+        generate_start_index=args.generate_start_index
     )
     dataset, dataloader, sampler = build_dataloader(
         dataset=dataset,
         batch_size=args.batch_size,
         dist=args.distributed,
         workers=args.workers,
-        training=False if args.split != 'train' else True
+        training=False # if args.generate_split != 'train' else True
     )
 
     autocast = get_autocast(args.precision)
@@ -164,7 +163,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
                 enumerate(dataloader),
                 total=dataloader.num_batches,
                 disable=args.rank != 0,
-                desc="validation {}:".format(args.split)
+                desc="validation {}:".format(args.generate_split)
         ):
             pred_num += 1
             if pred_num > args.generate_nums:
@@ -218,7 +217,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
             for bs in range(outputs.shape[0]):
                 sample_idx = batch_dict['sample_idx'][bs]
                 batch_pred[sample_idx] = dict()
-                batch_pred[sample_idx]['input_text'] = batch_dict['input_text'][bs]
+                batch_pred[sample_idx]['full_text'] = batch_dict['input_text'][bs]
                 batch_pred[sample_idx]['pred_text'] = tokenizer.batch_decode(outputs, skip_special_tokens=True)[bs]
                 batch_pred[sample_idx]['input_answer_text'] = input_answer_text[bs]
 

@@ -48,7 +48,7 @@ def get_grouped_params(model,args):
         {"params": params_without_wd, "weight_decay": 0.0},
     ]
 
-def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
+def check_checkpoint(args,model,optimizer,lr_scheduler,logger):
     # check if a checkpoint exists for this run
     if os.path.exists(f"{args.run_name}") and args.resume_from_checkpoint is None:
         checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
@@ -66,8 +66,22 @@ def check_checkpoint(args,ddp_model,optimizer,lr_scheduler,logger):
     if args.resume_from_checkpoint is not None:
         if args.rank == 0:
             logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
+
         checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
-        ddp_model.load_state_dict(checkpoint["model_state_dict"], False)
+
+        model_state_dict = model.state_dict()
+        state_disk = {k.replace('module.',''):v for k,v in checkpoint["model_state_dict"].items()}
+
+        update_model_state = {}
+        for key, val in state_disk.items():
+            if key in model_state_dict and model_state_dict[key].shape == val.shape:
+                update_model_state[key] = val
+            else:
+                logger.info(
+                    'Ignore weight %s: %s' % (key, str(val.shape))
+                )
+        model.load_state_dict(update_model_state, strict=False)
+
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"]) if optimizer is not None else None
         lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"]) if lr_scheduler is not None else None
         resume_from_epoch = checkpoint["epoch"] + 1
@@ -469,6 +483,15 @@ def main():
         device_id = args.rank % total_gpus
         model = model.to(device_id)
 
+        # TODO : check if a checkpoint exists for this run
+        resume_from_epoch, global_step = check_checkpoint(
+            args,
+            model,
+            optimizer=None,
+            lr_scheduler=None,
+            logger=logger
+        )
+
         if args.distributed:
             from torch.nn.parallel import DistributedDataParallel as DDP
             ddp_model = DDP(model, device_ids=[device_id])
@@ -479,20 +502,9 @@ def main():
             ddp_model = model
             logger.info('Training with a single process')
 
-        # TODO : check if a checkpoint exists for this run
-        resume_from_epoch, global_step = check_checkpoint(
-            args,
-            ddp_model,
-            optimizer=None,
-            lr_scheduler=None,
-            logger=logger
-        )
-
         if not args.text_generate:
 
             logger.info("**************************** Validation: {} ****************************".format(args.split))
-
-            model = model.to(device_id)
 
             validation(
                 args=args,
@@ -504,8 +516,6 @@ def main():
         else:
 
             logger.info("**************************** text generate ****************************")
-
-            model = model.to(device_id)
 
             val_loss,predictions = text_generate(
                 args=args,

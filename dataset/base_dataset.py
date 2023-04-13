@@ -16,7 +16,7 @@ import torch.utils.data as torch_data
 from pathlib import Path
 
 class BaseDataset(torch_data.Dataset):
-    def __init__(self,config, split, training=True, logger=None, in_memory=True):
+    def __init__(self,config, split, training=True, logger=None, in_memory=True, **kwargs):
         super().__init__()
         self.config = config
         self.split = split
@@ -76,6 +76,11 @@ class BaseDataset(torch_data.Dataset):
             else:
                 self.obj_ft_file = None
             self.img_dir = None
+
+        if kwargs.get('generate_start_index',None) is not None:
+            self.generate_start_index = kwargs['generate_start_index']
+        else:
+            self.generate_start_index = None
 
         print('Dataset Initialize')
 
@@ -294,6 +299,9 @@ class BaseDataset(torch_data.Dataset):
         return data_dict
 
     def __getitem__(self, index):
+        if self.generate_start_index is not None:
+            index += self.generate_start_index
+
         item = self.data[index]
         scan = item['scan']
 

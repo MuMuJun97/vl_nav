@@ -23,6 +23,9 @@ def read_args():
     parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
     parser.add_argument('--trainval_step', type=int, default=0, help='train and eval step')
     parser.add_argument('--text_generate', default=False, action="store_true", help='text generate')
+    parser.add_argument('--generate_split', type=str, default="train", help='train,val_unseen,')
+    parser.add_argument('--generate_start_index', type=int, default=20000, help='start index')
+    parser.add_argument('--generate_nums', type=int, default=40, help='text generate nums')
 
     ############# FLAMINGO #############
     parser.add_argument("--vision_encoder_path", default="ViT-B-16", type=str) # ViT-B-16, ViT-L-14
