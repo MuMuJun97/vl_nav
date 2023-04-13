@@ -7,6 +7,8 @@
 ## 2. srun --partition=OpenDialogLab_S2 --gres=gpu:1 --ntasks-per-node=1 -n1 -c 32 --mem-per-cpu=40G --pty bash
 ## 3. torchrun --nnodes=1 --nproc_per_node=8 train_net.py --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml --batch_size 2 --vision_encoder_path "ViT-B-16" --cross_attn_every_n_layers 8 --warmup_steps 1200 --num_epochs 20 --workers=4 --logging_steps 100
 ## 4. torchrun --nnodes=1 --nproc_per_node=8 train_net.py --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml --batch_size 2 --vision_encoder_path "ViT-B-16" --cross_attn_every_n_layers 8 --warmup_steps 1200 --num_epochs 20 --workers=4 --logging_steps 1000
+## 5. generate:
+  torchrun --nnodes=1 --nproc_per_node=1 --master_port 33534 eval_net.py --text_generate --split val_seen --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml --batch_size 2 --vision_encoder_path "ViT-L-14" --cross_attn_every_n_layers 8 --run_name Train1 --warmup_steps 1200 --num_epochs 40 --workers=0 --logging_steps 1000 --learning_rate 3e-5 --weight_decay 0.05  --text_generate --split val_seen --generate_start_index 6000 --generate_nums 200
 torchrun --nnodes=1 --nproc_per_node=8 train_net.py \ 
   --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models \ # LLaMa-7B
   --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml \

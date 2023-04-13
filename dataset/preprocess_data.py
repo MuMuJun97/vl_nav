@@ -38,9 +38,13 @@ promptQAs = {
         "what is the next step I should take based on the instruction: {Instruction}?",
         "I am going to direction {ViewID}, what do I do?",
     ],
+    # 'R2RAnswer': [
+    #     "you should go in direction {ViewID}.",
+    #     "you can follow the navigation instruction: {Instruction}",
+    # ],
     'R2RAnswer': [
-        "you should go in direction {ViewID}.",
-        "you can follow the navigation instruction: {Instruction}",
+        "{ViewID}",
+        "{Instruction}",
     ],
     ############## Other Options ##############
     ############## Other Options ##############
