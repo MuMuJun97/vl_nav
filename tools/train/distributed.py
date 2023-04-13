@@ -109,6 +109,8 @@ def init_distributed_device(args):
     else:
         DistSingleGPU = False
         if DistSingleGPU:
+            # TODO in S2: "torchrun --nnodes=1 --nproc_per_node=1" Bug
+            # DistSingleGPU = False
             os.environ['MASTER_ADDR'] = '127.0.0.1'
             from socket import socket
             with socket() as s:

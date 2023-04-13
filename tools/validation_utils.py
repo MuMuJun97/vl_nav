@@ -213,17 +213,6 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
                 )
             outputs = outputs[:, len(input_ids[0]):]
 
-            batch_pred = dict()
-            for bs in range(outputs.shape[0]):
-                sample_idx = batch_dict['sample_idx'][bs]
-                batch_pred[sample_idx] = dict()
-                batch_pred[sample_idx]['full_text'] = batch_dict['input_text'][bs]
-                batch_pred[sample_idx]['pred_text'] = tokenizer.batch_decode(outputs, skip_special_tokens=True)[bs]
-                batch_pred[sample_idx]['input_answer_text'] = input_answer_text[bs]
-
-            predictions.update(batch_pred)
-
-
             ############## VALIDATION LOSS ##############
             input_text = tokenizer(
                 batch_dict['input_text'],
@@ -260,7 +249,18 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
             )[0]
             loss_metric.accumulate(loss.data.item())
 
+            batch_pred = dict()
+            for bs in range(outputs.shape[0]):
+                sample_idx = batch_dict['sample_idx'][bs]
+                batch_pred[sample_idx] = dict()
+                batch_pred[sample_idx]['full_text'] = batch_dict['input_text'][bs]
+                batch_pred[sample_idx]['pred_text'] = tokenizer.batch_decode(outputs, skip_special_tokens=True)[bs]
+                batch_pred[sample_idx]['input_answer_text'] = input_answer_text[bs]
+                batch_pred[sample_idx]['mean_loss'] = loss.data.item()
+            predictions.update(batch_pred)
+
     val_loss = loss_metric.average
+    predictions['val_mean_loss'] = val_loss
     return val_loss,predictions
 
 def inference_text_generation(
