@@ -112,10 +112,17 @@ class BaseDataset(torch_data.Dataset):
             res_dict = pickle.load(f)
         return res_dict
 
-    def read_image(self, scan, viewpoint):
+    def read_image(self, scan, viewpoint, index):
         img_file = self.img_dir / scan / '{}_{}.png'.format(scan,viewpoint)
         assert img_file.exists()
         img = cv2.imread(str(img_file)) # BRG
+
+        if self.generate_start_index is not None:
+            save_dir = self.img_dir.parent / 'samples'
+            save_dir.mkdir(parents=True, exist_ok=True)
+            save_file = save_dir / "{}_{}_{}.png".format(index,scan,viewpoint)
+            cv2.imwrite(str(save_file),img)
+
         imgs = np.hsplit(img,12)
 
         images = [
@@ -135,9 +142,9 @@ class BaseDataset(torch_data.Dataset):
 
         return images, None, None
 
-    def get_image_data(self, scan, viewpoint):
+    def get_image_data(self, scan, viewpoint, index):
         if self.img_dir is not None:
-            return self.read_image(scan, viewpoint)
+            return self.read_image(scan, viewpoint, index)
         else:
             return self.get_scan_viewpoint_feature(scan, viewpoint)
 
@@ -247,7 +254,7 @@ class BaseDataset(torch_data.Dataset):
 
             # for fine-grained dataset: sub-path <-> sub-instruction
             viewpoint = item['path'][vp_index]
-            view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint)
+            view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
             ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
 
             if 'ViewID' in question: # "I am going to direction {ViewID}, what do I do?",
@@ -274,7 +281,7 @@ class BaseDataset(torch_data.Dataset):
 
             # for soon dataset: end viewpoint is the target location <-> instructions
             viewpoint = item['path'][vp_index] # item['path'][-1] is the goal location
-            view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint)
+            view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
 
         input_text = self.generate_input_text(
             question=question,
