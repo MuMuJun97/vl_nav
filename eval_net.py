@@ -337,7 +337,7 @@ def main():
     )
 
     ################### Word Tokens ###################
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "left"
     media_token_id = tokenizer("<image>", add_special_tokens=False)["input_ids"][-1]
     question_token_id = tokenizer("Question", add_special_tokens=False)["input_ids"][-1]
     answer_token_id = tokenizer("?Answer", add_special_tokens=False)["input_ids"][-1]

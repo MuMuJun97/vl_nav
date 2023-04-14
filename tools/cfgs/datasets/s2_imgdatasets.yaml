@@ -5,21 +5,25 @@ Dataset:
   # navigableLocations
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
-  SOON_DIR: "data/SOON/annotations/iccv21_new_released" # train.json
-  SOON_SPLIT: {
-    "train": "train.json",
-    "val_seen": "val_unseen_house.json",
-    "val_unseen": "val_unseen_instrs.json",
-    "test": "test_v2.json"
-  }
+  # Specify the dataset name to use
+  SOURCE: ['SOON','FR2R']
+  SOON:
+    DIR: "data/SOON/annotations/iccv21_new_released" # train.json
+    SPLIT: {
+      "train": "train.json",
+      "val_seen": "val_unseen_house.json",
+      "val_unseen": "val_unseen_instrs.json",
+      "test": "test_v2.json"
+    }
 
-  FR2R_DIR: "data/Fine-Grained-R2R/data" # FGR2R_train.json
-  FR2R_SPLIT: {
-    "train": "FGR2R_train.json",
-    "val_seen": "FGR2R_val_seen.json",
-    "val_unseen": "FGR2R_val_unseen.json",
-    "test": "FGR2R_test.json"
-  }
+  FR2R:
+    DIR: "data/Fine-Grained-R2R/data" # FGR2R_train.json
+    SPLIT: {
+      "train": "FGR2R_train.json",
+      "val_seen": "FGR2R_val_seen.json",
+      "val_unseen": "FGR2R_val_unseen.json",
+      "test": "FGR2R_test.json"
+    }
 
   Img_Features_File_Map: {
     # from HM3D-AutoVLN
@@ -50,8 +54,13 @@ Dataset:
     eos_token: '</s>'
     max_length: 256
     prompt:
-      task_description_type: "common"
-      template: "{task_description}Environment:{environment}{question}{answer}{tokenizer_eos_token}"
+      type: "flamingo"
+      task_type: "short"
+      image_id: True
+      template: {
+        "common": "{task_description}Environment:{environment}{question}{answer}{tokenizer_eos_token}",
+        "flamingo": "{task_description}Environment:{environment}{question}{answer}{endofchunk}{tokenizer_eos_token}",
+      }
 
   vision_encoder:
     image_size: [224,224]

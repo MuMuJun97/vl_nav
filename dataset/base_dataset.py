@@ -24,33 +24,38 @@ class BaseDataset(torch_data.Dataset):
         self.logger = logger
         self.data_dir = Path(config.DATA_DIR).resolve()
         root_dir = Path(__file__).parent.parent.resolve()
-        try:
-            self.soon_file = root_dir / self.config.SOON_DIR / self.config.SOON_SPLIT[split]
-            self.fr2r_file = root_dir / self.config.FR2R_DIR / self.config.FR2R_SPLIT[split]
-        except Exception as e:
-            print(e)
-            print("[Error] args.split: {} is not true; select from: [{}]".format(split,self.config.SOON_SPLIT.keys()))
 
+        #################### Source Dataset ####################
         # read Matterport3D navigableLocations
         self.navigable_loc = self.get_navigable_Locations()
 
-        # read SOON data
-        self.soon_data = preprocess_soon_v1(
-            self.soon_file,
-            self.navigable_loc,
-        )
-
-        # read Fine-grained data
-        self.fr2r_data = preprocess_fr2r(
-            self.fr2r_file,
-            self.navigable_loc,
-        )
+        self.source_data = config.SOURCE
+        print('[INFO] ********* use dataset : {} *********'.format(self.source_data))
+        self.data = []
+        if 'SOON' in self.source_data:
+            soon_file = root_dir / config.SOON.DIR / config.SOON.SPLIT[split]
+            # read SOON data
+            self.soon_data = preprocess_soon_v1(
+                soon_file,
+                self.navigable_loc,
+            )
+            self.data += self.soon_data
+        else:
+            self.soon_data = []
+        if 'FR2R' in self.source_data:
+            fr2r_file = root_dir / config.FR2R.DIR / config.FR2R.SPLIT[split]
+            # read Fine-grained data
+            self.fr2r_data = preprocess_fr2r(
+                fr2r_file,
+                self.navigable_loc,
+            )
+            self.data += self.fr2r_data
+        else:
+            self.fr2r_data = []
 
         # '</s>'
         self.tokenizer_eos_token = self.config.tokenizer.eos_token
         self.prompt = self.config.tokenizer.prompt
-
-        self.data = self.soon_data + self.fr2r_data
 
         if self.config.get('IMG_DIR',None) is not None:
             self.in_memory = in_memory
@@ -198,55 +203,54 @@ class BaseDataset(torch_data.Dataset):
                 self._feature_store[key] = (view_fts, obj_fts, obj_attrs)
         return view_fts, obj_fts, obj_attrs
 
-    def generate_input_text(self,question,answer,view_mask):
-        # __comment__
-        # prompt = '<image>{text}{tokenizer_eos_token}'; "<image>{text}<|endofchunk|>{tokenizer_eos_token}"
-        # "".join(["<image_{}>".format(i) for i in range(12)]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
-
-        # __comment__
-        # prompt = "".join(["<image>" if i==1 else "<PAD>" for i in view_mask]) + "{text}<|endofchunk|>{tokenizer_eos_token}"
-
-        # __comment__
-        # remove "<|endofchunk|>": for get index of all endofchunk tokens in the sequence
-
-        task_desc_type = self.prompt.task_description_type
+    def generate_input_text(self,question,answer):
+        task_desc_type = self.prompt.task_type
         task_description = promptQAs['task_description'][task_desc_type]
-        prompt = self.prompt.template
+        prompt = self.prompt.template[self.prompt.type]
 
-        environment = "".join(["<image>" if i==1 else "<image>" for i in view_mask])
-
+        # environment = "".join(["<image>" if i==1 else "<image>" for i in view_mask])
+        use_image_id = self.prompt.image_id
+        environment = "".join(["<image>-direction {};".format(i) if use_image_id else "<image>" for i in range(12)])
+        environment = environment + "."
         question = " ".join(question.split())
         answer = " ".join(answer.split())
-        if self.training:
+
+        if self.prompt.type == "common":
             input_text = prompt.format(
                 task_description=task_description,
                 environment=environment,
                 question=question,
                 answer=answer,
+                tokenizer_eos_token=self.tokenizer_eos_token
+            )
+        elif self.prompt.type == "flamingo":
+            input_text = prompt.format(
+                task_description=task_description,
+                environment=environment,
+                question=question,
+                answer=answer,
+                endofchunk='<|endofchunk|>',
                 tokenizer_eos_token=self.tokenizer_eos_token
             )
         else:
-            # TODO for text generation
-            # text = "{question}{answer}".format(question=question,answer="Answer:")
-            # input_text = prompt.format(text=text, tokenizer_eos_token="")
+            raise NotImplementedError
 
-            # for validation loss
-            input_text = prompt.format(
-                task_description=task_description,
-                environment=environment,
-                question=question,
-                answer=answer,
-                tokenizer_eos_token=self.tokenizer_eos_token
-            )
+        # whitespace cleanup
+        input_text = (
+            input_text.replace(" <|endofchunk|>", "<|endofchunk|>")
+            .replace("<image> ", "<image>")
+            .replace(" <image>", "<image>")
+            .replace(" Question", ".Question")
+            .replace(" Answer", "?Answer")
+        )
 
         return input_text
 
     def get_data_dict(self, item, scan, index):
-        question = item['qa']['question']
-        answer = item['qa']['answer']
-        view_mask = torch.ones(12)
 
+        ### [1] Fine-grained R2R Dataset
         if index >= len(self.soon_data):
+
             vp_index = 0 # start viewpoint
 
             if self.training:
@@ -257,27 +261,25 @@ class BaseDataset(torch_data.Dataset):
             view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
             ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
 
-            if 'ViewID' in question: # "I am going to direction {ViewID}, what do I do?",
-                if ViewpointNext == -1:
-                    question = "Question:the navigation will stop at the current location, what do I do?"
-                else:
-                    question = question.format(ViewID=ViewpointNext)
-                    view_mask = torch.zeros(12)
-                    view_mask[ViewpointNext] = 1
-            else: # "What is the next step I should take based on the instruction: {Instruction}?",
-                if ViewpointNext == -1:
-                    answer = "Answer:you should stop."
-                else:
+            if ViewpointNext == -1:
+                # [1] next step is STOP
+                question = item['qa']['question_instr2view'] # instr->next step
+                answer = 'Answer:stop'
+            else:
+                if index % 2 == 0:
+                    question = item['qa']['question_instr2view']  # [2] instr->next step
+                    answer = item['qa']['answer_instr2view']
                     answer = answer.format(ViewID=ViewpointNext)
-        else:
-            vp_index = -1  # end viewpoint
+                else:
+                    question = item['qa']['question_view2instr']  # [3] give view->instruction
+                    question = question.format(ViewID=ViewpointNext)
+                    answer = item['qa']['answer_view2instr']
 
-            # if self.training:
-            #     prob = random.random()
-            #     if prob < 0.5:
-            #         path_length = len(item['path'])
-            #         if path_length >= 3:
-            #             vp_index = random.randint(path_length-2,path_length-1)
+        ### [2] SOON Dataset
+        else:
+            question = item['qa']['question']
+            answer = item['qa']['answer']
+            vp_index = -1  # end viewpoint
 
             # for soon dataset: end viewpoint is the target location <-> instructions
             viewpoint = item['path'][vp_index] # item['path'][-1] is the goal location
@@ -286,11 +288,9 @@ class BaseDataset(torch_data.Dataset):
         input_text = self.generate_input_text(
             question=question,
             answer=answer,
-            view_mask=view_mask,
         )
 
         if self.img_dir is not None:
-            view_fts[view_mask==0]=0
             data_dict = {
                 'input_text': input_text,
                 'imgs': view_fts,

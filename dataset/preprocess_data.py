@@ -25,27 +25,56 @@ promptQAs = {
                 "Get information about object attributes and positional relationships in the current room "
                 "from the agent's 12 discrete heading view images. "
                 "The agent will also provide the option to stop if necessary.",
+      "short": "Please help me navigate inside the building. "
+               "I will provide 12 images of the environment from different direction angles.",
     },
     ############## SOON ##############
     'soon_target': [
         "what does the {target} look like?",  # 0
-        "what is the relationship between the {target} and other objects in the room?",  # 1
-        "which room or area is the current location in?",  # 2
-        "what is the relationship between the current room and other neighboring rooms?",  # 3
+        "where is the {target}?",  # 1
+        "which room or area is the {target} in?",  # 2
+        "how to find the {target}?",  # 3
     ],
+    ###########################################
+    # 'soon_target': [
+    #     "what does the {target} look like?",  # 0
+    #     "what is the relationship between the {target} and other objects in the room?",  # 1
+    #     "which room or area is the current location in?",  # 2
+    #     "what is the relationship between the current room and other neighboring rooms?",  # 3
+    # ],
     ############## Fine-grained R2R ##############
-    'R2R': [
-        "what is the next step I should take based on the instruction: {Instruction}?",
-        "I am going to direction {ViewID}, what do I do?",
-    ],
+    'R2R': {
+        'instr2view':{
+            'question': "which direction does the navigation instruction \"{Instruction}\" refer to?",
+            'answer'  : "{ViewID}",
+        },
+        'view2instr':{
+            'question': "how to get to direction {ViewID}?",
+            'answer'  : "{Instruction}",
+        },
+        'stop':{
+            'question': "what is the next action for the navigation instruction \"{Instruction}\"?",
+            'answer'  : "stop",
+        },
+    },
+    # 'R2R': [
+    #     "which direction does the navigation instruction \"{Instruction}\" refer to?", # 0: instr2view
+    #     "how to get to direction {ViewID}?", # view2instr
+    # ],
+    # 'R2RAnswer': [
+    #     "{ViewID}",
+    #     "{Instruction}",
+    # ],
+    ###########################################
+    # 'R2R': [
+    #     "what is the next step I should take based on the instruction: {Instruction}?",
+    #     "I am going to direction {ViewID}, what do I do?",
+    # ],
     # 'R2RAnswer': [
     #     "you should go in direction {ViewID}.",
     #     "you can follow the navigation instruction: {Instruction}",
     # ],
-    'R2RAnswer': [
-        "{ViewID}",
-        "{Instruction}",
-    ],
+
     ############## Other Options ##############
     ############## Other Options ##############
     ############## Other Options ##############
@@ -238,6 +267,8 @@ def preprocess_soon_v1(soon_file, navigable_loc):
             _item['instruction'][ridx].format()
         )
 
+        # print(question_text)
+        # print(answer)
         # input_text = generate_qa(
         #     question=question_text,
         #     answer=answer,
@@ -252,86 +283,129 @@ def preprocess_soon_v1(soon_file, navigable_loc):
         pbar.update(1)
     return res_data
 
+def save_question_answer(res_data, type="fr2r"):
+    """
+    @func:
+        save SOON dataset question and answer to json.
+    """
+    all_qas = dict()
+    for idx, _item in enumerate(res_data):
+        all_qas[idx] = dict()
+        if type == "fr2r":
+            all_qas[idx]['question_instr2view'] = _item['qa']['question_instr2view']
+            all_qas[idx]['answer_instr2view'] = _item['qa']['answer_instr2view']
+            all_qas[idx]['question_view2instr'] = _item['qa']['question_view2instr']
+            all_qas[idx]['answer_view2instr'] = _item['qa']['answer_view2instr']
+        else:
+            all_qas[idx]['question'] = _item['qa']['question']
+            all_qas[idx]['answer'] = _item['qa']['answer']
+    qa_file = "data/{}_qa.json".format(type)
+    with open(str(qa_file), 'w') as f:
+        json.dump(all_qas, f, indent=2)
+
 
 def preprocess_fr2r(fr2r_file, navigable_loc):
-    # prompt_Option = 0
     assert fr2r_file.exists()
     with open(str(fr2r_file),"r") as f:
         fr2r_data = json.load(f)
     res_data = []
     item_idx = 0
     pbar = tqdm(fr2r_data, desc="preprocess fine-grained data:")
+
+    stop_cases = []
+    filter_cases_path = 0
+    filter_cases_instr = 0
+
     for idx, _ in enumerate(pbar):
         for j,chunk in enumerate(fr2r_data[idx]['chunk_view']):
             for k,sub_path in enumerate(chunk):
                 item = dict()
                 item['sample_idx'] = item_idx
+
                 item['scan'] = fr2r_data[idx]['scan']
                 item['fr2r'] = {
                     'distance': fr2r_data[idx]['distance'],
                     'path_id': fr2r_data[idx]['path_id'],
                     'heading': fr2r_data[idx]['heading'],
                 }
-                start_index = sub_path[0]-1
-                end_index = sub_path[1]
-                item['path'] = fr2r_data[idx]['path'][start_index:end_index]
-                new_instructions = ast.literal_eval(fr2r_data[idx]['new_instructions'])
-
-                item['qa'] = {
-                    'full_instr': fr2r_data[idx]['instructions'][j],
-                    'sub_instr': " ".join(new_instructions[j][k])
-                }
 
                 # navigable_pathViewIds = [0] # start_view=0
                 navigable_pathViewIds = []
-                for curIx in range(len(item['path'])-1):
-                    curNode = item['path'][curIx]
-                    nextNode = item['path'][curIx+1]
+                for curIx in range(len(fr2r_data[idx]['path'])-1):
+                    curNode = fr2r_data[idx]['path'][curIx]
+                    nextNode = fr2r_data[idx]['path'][curIx+1]
                     nextViewId = navigable_loc[item['scan']][curNode][nextNode]['pointId']
                     navigable_pathViewIds.append(nextViewId)
                 navigable_pathViewIds.append(-1) # end_view=-1
-                item['navigable_pathViewIds'] = navigable_pathViewIds
-
-                # if prompt_Option == 0: # √
-                #     question_text = "Question: {}".format(promptQAs['image+text'][4])
-                #     question_text = question_text.replace('<Instruction>', item['qa']['sub_instr'])
-                #     question = promptQAs['open_flamingo'][0].format(text=question_text,tokenizer_eos_token=tokenizer_eos_token)
-                #     answer = "Answer: {}".format(promptQAs['answer+viewpoint'][0])
-                # elif prompt_Option == 1:
-                #     question = "Question: {}".format(promptQAs['image+text'][2])
-                #     question = question.replace('<Instruction>',item['qa']['sub_instr'])
-                #     answer = "Answer: {}".format(promptQAs['answer+viewpoint'][0])
-                # else:
-                #     NotImplementedError
-
-                qa_idx = item_idx % len(promptQAs['R2R'])
-                question_text = "Question:{}".format(
-                    promptQAs['R2R'][qa_idx]
-                )
-                if 'Instruction' in question_text:
-                    question_text = question_text.format(
-                        Instruction=item['qa']['sub_instr']
-                    )
-                    answer = "Answer:{}".format(promptQAs['R2RAnswer'][qa_idx])
-                elif 'ViewID' in question_text:
-                    answer = "Answer:{}".format(
-                        promptQAs['R2RAnswer'][qa_idx].format(
-                            Instruction=item['qa']['sub_instr']
-                        )
-                    )
+                # remove shorter sub-path;
+                start_index = sub_path[0]-1
+                if sub_path[1] != len(fr2r_data[idx]['path']):
+                    end_index = sub_path[1]-1
                 else:
-                    raise NotImplementedError
+                    end_index = sub_path[1]
+                if end_index - start_index < 1:
+                    filter_cases_path += 1
+                    continue
 
+                item['path'] = fr2r_data[idx]['path'][start_index:end_index]
+                new_instructions = ast.literal_eval(fr2r_data[idx]['new_instructions'])
 
-                # input_text = generate_qa(
-                #     question=question_text,
-                #     answer=answer,
-                #     tokenizer_eos_token=tokenizer_eos_token
-                # )
+                cur_sub_instr = new_instructions[j][k]
 
-                # item['qa']['input_text'] = input_text
-                item['qa']['question'] = question_text
-                item['qa']['answer'] = answer
+                ### ['and', 'turn', 'left'] --> ['turn', 'left']
+                ### ['and', 'stop'] --> ['stop']
+                if 'and' in cur_sub_instr[0]:
+                    cur_sub_instr = cur_sub_instr[1:]
+
+                ### remove short cases: ['stop']
+                if len(cur_sub_instr) <= 2:
+                    filter_cases_instr += 1
+                    continue
+
+                # TODO: set next direction ID to current viewpoint
+                item['navigable_pathViewIds'] = navigable_pathViewIds[start_index:end_index]
+
+                item['qa'] = {
+                    'full_instr': fr2r_data[idx]['instructions'][j],
+                    'sub_instr': " ".join(cur_sub_instr)
+                }
+
+                if 'stop' in item['qa']['sub_instr']:
+                    stop_cases.append(item['qa']['sub_instr'])
+
+                # qa type 1: give instruction, ask direction ViewID
+                question_instr2view = "Question:{}".format(
+                    promptQAs['R2R']['instr2view']['question']
+                )
+                question_instr2view = question_instr2view.format(
+                    Instruction=item['qa']['sub_instr']
+                )
+                answer_instr2view = "Answer:{}".format(promptQAs['R2R']['instr2view']['answer'])
+
+                # qa type 2: give ViewID, ask instruction
+                question_view2instr = "Question:{}".format(
+                    promptQAs['R2R']['view2instr']['question']
+                )
+                answer_view2instr = "Answer:{}".format(promptQAs['R2R']['view2instr']['answer'])
+                answer_view2instr = answer_view2instr.format(
+                    Instruction=item['qa']['sub_instr']
+                )
+
+                # qa type 3: give instruction, ask next action: STOP
+                question_stop = "Question:{}".format(
+                    promptQAs['R2R']['stop']['question']
+                )
+                question_stop = question_stop.format(
+                    Instruction=item['qa']['sub_instr']
+                )
+                answer_stop = "Answer:{}".format(promptQAs['R2R']['stop']['answer'])
+
+                item['qa']['question_instr2view'] = question_instr2view
+                item['qa']['answer_instr2view'] = answer_instr2view
+                item['qa']['question_view2instr'] = question_view2instr
+                item['qa']['answer_view2instr'] = answer_view2instr
+                item['qa']['question_stop'] = question_stop
+                item['qa']['answer_stop'] = answer_stop
 
                 res_data.append(item)
                 item_idx += 1
@@ -340,4 +414,12 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
     # from dataset.utils.visualize_mp3d import mp3d_view
     # for item_s in res_data[:100]:
     #     mp3d_view(item_s)
+
+    print('[INFO] collecting Fine-grained dataset {} samples'.format(len(res_data)))
+    print('[INFO] filter and remove: (1) short sub-path {} samples; (2) short sub-instruct {} samples'.format(
+        filter_cases_path, filter_cases_instr
+    ))
+    print('[INFO] there are {:.2f}% ({}/{}) STOP samples in Fine-grained R2R dataset'.format(
+        (len(stop_cases)/len(res_data)),len(stop_cases),len(res_data)
+    ))
     return res_data

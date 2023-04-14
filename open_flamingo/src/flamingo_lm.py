@@ -79,7 +79,8 @@ class FlamingoLMMixin(nn.Module):
         use_media_placement_augmentation,
     ):
         """
-        Initialize Flamingo by adding a new gated cross attn to the decoder. Store the media token id for computing the media locations.
+        Initialize Flamingo by adding a new gated cross attn to the decoder.
+        Store the media token id for computing the media locations.
         """
 
         self.gated_cross_attn_layers = nn.ModuleList(

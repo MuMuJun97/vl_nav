@@ -201,14 +201,16 @@ def train_one_epoch(
         )
 
         labels = input_ids.clone()
-        labels[labels == tokenizer.pad_token_id] = -100
-        labels[:, 0] = -100
+        labels[labels == tokenizer.pad_token_id] = -100 # <PAD> LLaMa
+        labels[:, 0] = -100 # first token <s> or <PAD>
         labels[labels == args.media_token_id] = -100
 
         # question->answer:
         answer_labels = labels.clone()
         for bs in range(labels.shape[0]):
-            st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
+            # LLaMa: tokenizer.decode([0,1,2,32000,32001,32002])
+            #   >>> '<unk><s></s><|endofchunk|><image><PAD>'
+            # st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
             ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
             ed_idx += 2  # "?Answer:"
             answer_labels[bs,:ed_idx] = -100
@@ -349,20 +351,23 @@ def main():
         cross_attn_every_n_layers=args.cross_attn_every_n_layers, # 1
         use_local_files=args.offline, # False
         use_media_placement_augmentation=args.use_media_placement_augmentation, # True
+        unfreeze_llm=args.unfreeze_llm, # unfreeze language model
     )
 
     ################### Word Tokens ###################
-    tokenizer.padding_side = "right"
+    # <PAD> on the left
+    tokenizer.padding_side = "left"
     media_token_id = tokenizer("<image>", add_special_tokens=False)["input_ids"][-1]
-    question_token_id = tokenizer("Question", add_special_tokens=False)["input_ids"][-1]
-    answer_token_id = tokenizer("?Answer", add_special_tokens=False)["input_ids"][-1]
     endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
         "input_ids"
     ][-1]
+    question_token_id = tokenizer(".Question", add_special_tokens=False)["input_ids"][-1]
+    answer_token_id = tokenizer("?Answer", add_special_tokens=False)["input_ids"][-1]
+
     args.media_token_id = media_token_id
+    args.endofchunk_token_id = endofchunk_token_id
     args.question_token_id = question_token_id
     args.answer_token_id = answer_token_id
-    args.endofchunk_token_id = endofchunk_token_id
 
     if args.split == 'train':
         logger.info("**************************** Training ****************************")
@@ -371,7 +376,8 @@ def main():
         dataset = BaseDataset(
             config=global_cfg.Dataset,
             split=args.split,
-            training=False if args.split != 'train' else True
+            training=False if args.split != 'train' else True,
+            rank=args.rank
         )
         dataset, dataloader, sampler = build_dataloader(
             dataset=dataset,
@@ -428,8 +434,8 @@ def main():
             logger.info('Training with a single process')
 
         total_training_steps = (
-                                       len(dataset) // (args.batch_size * args.world_size)
-                               ) * args.num_epochs
+            len(dataset) // (args.batch_size * args.world_size)
+        ) * args.num_epochs
 
         logger.info(f"Total training steps: {total_training_steps}")
         tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard')) if args.rank == 0 else None

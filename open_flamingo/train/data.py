@@ -269,7 +269,7 @@ def preprocess_image(sample, image_processor):
 
 
 def preprocess_text(sample, tokenizer):
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "left"
     sample = [
         (f"<image>{s.strip()}<|endofchunk|>{tokenizer.eos_token}") for s in sample
     ]
@@ -342,7 +342,7 @@ def preprocess_interleaved(sample, tokenizer, clip_processor, sim_threshold):
         .replace(" <image>", "<image>")
     )
     text = f"{text}<|endofchunk|>{tokenizer.eos_token}"
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "left"
     text_tensor = tokenizer(
         text, max_length=256, truncation=True, padding="max_length", return_tensors="pt"
     )

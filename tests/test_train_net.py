@@ -92,7 +92,7 @@ def main():
         use_local_files=args.offline,  # False
         use_media_placement_augmentation=args.use_media_placement_augmentation,  # True
     )
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "left"
 
     random_seed(args.seed, args.rank)
 

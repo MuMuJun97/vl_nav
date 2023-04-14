@@ -129,7 +129,7 @@ class PerceiverResampler(nn.Module):
             x = x + self.media_time_embs[:T]
 
         # blocks
-        latents = repeat(self.latents, "n d -> b T n d", b=b, T=T)
+        latents = repeat(self.latents, "n d -> b T n d", b=b, T=T) # self.latents [64,768]
         for attn, ff in self.layers:
             latents = attn(x, latents) + latents
             latents = ff(latents) + latents
@@ -181,7 +181,7 @@ class MaskedCrossAttention(nn.Module):
         x = self.norm(x)
 
         q = self.to_q(x)
-        media = rearrange(media, "b t n d -> b (t n) d")
+        media = rearrange(media, "b t n d -> b (t n) d")  # (B,T_img*64 query, d=768)
 
         k, v = self.to_kv(media).chunk(2, dim=-1)
         q, k, v = rearrange_many((q, k, v), "b n (h d) -> b h n d", h=h)
@@ -209,6 +209,7 @@ class MaskedCrossAttention(nn.Module):
 
             # text time must equal media time if only attending to most immediate image
             # otherwise, as long as text time is greater than media time (if attending to all previous images / media)
+            # torch.eq: equals =; torch.ge: greater than or equal to >=
             mask_op = torch.eq if self.only_attend_immediate_media else torch.ge
 
             text_to_media_mask = mask_op(
@@ -242,9 +243,14 @@ class GatedCrossAttentionBlock(nn.Module):
         dim_head=64,
         heads=8,
         ff_mult=4,
-        only_attend_immediate_media=True,
+        only_attend_immediate_media=False,
     ):
+        """
+            only_attend_immediate_media=False: Masked Cross Attention策略,关注前面的所有图片,12 image views
+            而不是仅关注单张图片.
+        """
         super().__init__()
+        only_attend_immediate_media = False
         self.attn = MaskedCrossAttention(
             dim=dim,
             dim_visual=dim_visual,

@@ -704,7 +704,7 @@ def evaluate_imagenet(
     ]
 
     # Padding from right allows efficient precomputing of context activations.
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "left"
 
     def _imagenet_prompt(class_name, is_context: bool = True):
         """Construct an imagenet prompt for a given label."""
