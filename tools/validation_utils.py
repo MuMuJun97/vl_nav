@@ -424,7 +424,15 @@ def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels):
         tokenizer:
         logits: predictions during training.
         loss:
-
+    Note:
+        :code: https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            ... # input [<s> Token Token...] -> pred [NextToken NextToken ...]
+                # labels [<s> GT GT ...]
+                # loss = CrossEntropyLoss( logits[..., :-1, :], labels[..., 1:] )
+            loss = loss_fct(shift_logits, shift_labels)
     Returns:
 
     """
@@ -438,8 +446,9 @@ def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels):
             input_answer_text[bs] = input_answer_text[bs][st_idx:].replace("Answer:", "")
 
             answer_sdx = (answer_labels[bs] != -100).nonzero(as_tuple=True)[0][0]
+            answer_sdx = answer_sdx-1 # Shift so that tokens < n predict n logits
 
-            answer_logits = logits[bs, answer_sdx:]
+            answer_logits = logits[bs, answer_sdx:-1]
             pred_tokens = torch.argmax(answer_logits, dim=-1)
 
             sample_idx = batch_dict['sample_idx'][bs]
