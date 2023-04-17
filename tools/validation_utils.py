@@ -3,7 +3,10 @@ from copy import deepcopy
 import os
 import time
 import numpy as np
+from pathlib import Path
+import datetime
 import torch
+import json
 from tqdm import tqdm
 from tools.train.train_utils import get_autocast, get_cast_dtype, AverageMeter
 from dataset.base_dataset import BaseDataset, build_dataloader
@@ -601,6 +604,15 @@ def train_one_epoch(
                 f"\nStep {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. "
                 f"\nAverage Loss: {loss_metric.average:.3f}"
             )
+
+    if args.train_with_generate and args.rank == 0:
+        train_pred_file = Path(args.run_name) / (
+                    'train_{}_pred_{}.json'.format(
+                        epoch,
+                        datetime.datetime.now().strftime('%Y%m%d-%H%M%S'),
+                    ))
+        with open(str(train_pred_file),'w') as f:
+            json.dump(predictions,f,indent=2)
 
     return global_step
 
