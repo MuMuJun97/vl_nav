@@ -486,7 +486,7 @@ def train_one_epoch(
             ed_idx += 2  # "?Answer:"
             answer_labels[bs,:ed_idx] = -100
 
-        labels.to(device_id)
+        # labels.to(device_id)
         answer_labels.to(device_id)
 
         with autocast():

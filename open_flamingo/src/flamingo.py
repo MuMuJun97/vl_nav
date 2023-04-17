@@ -419,4 +419,6 @@ class Flamingo(nn.Module):
             if unfinished_sequences.max() == 0 or input_ids.shape[-1] >= max_length:
                 break
 
+        self.lang_encoder.clear_conditioned_layers()
+
         return input_ids
