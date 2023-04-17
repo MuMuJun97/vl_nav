@@ -1,4 +1,3 @@
-import glob
 import json
 import os
 import pickle
@@ -15,306 +14,15 @@ from transformers import get_constant_schedule_with_warmup
 from open_flamingo import create_model_and_transforms
 from tools.parser import read_args,random_seed
 from tools.validation_utils import (
-    validation,Metrics,
-    text_generate,forward_with_loss,
-    inference_text_generation
+    val_one_epoch,train_one_epoch
 )
 from tools.train.distributed import world_info_from_env, init_distributed_device
-from tools.train.train_utils import get_autocast,get_cast_dtype,AverageMeter
+from tools.train.train_utils import (
+    get_grouped_params, check_checkpoint,
+    get_checkpoint, save_checkpoint,
+)
 import datetime
 from tensorboardX import SummaryWriter
-
-def get_grouped_params(model,args):
-    params_with_wd, params_without_wd = [], []
-
-    def apply_decay(x):
-        return (
-                "gated_cross_attn_layer" in x
-                and "ff_gate" not in x
-                and "attn_gate" not in x
-                and "norm" not in x
-                and "bias" not in x
-        )
-
-    for n, p in model.named_parameters():
-        # if p.requires_grad:
-        if apply_decay(n):
-            params_with_wd.append(p)
-        else:
-            params_without_wd.append(p)
-
-    return [
-        {"params": params_with_wd, "weight_decay": args.weight_decay},
-        {"params": params_without_wd, "weight_decay": 0.0},
-    ]
-
-def check_checkpoint(args,model,optimizer,lr_scheduler,logger):
-    # check if a checkpoint exists for this run
-    if os.path.exists(f"{args.run_name}") and args.resume_from_checkpoint is None:
-        checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
-        if len(checkpoint_list) == 0:
-            logger.info(f"Found no checkpoints for run {args.run_name}.")
-        else:
-            args.resume_from_checkpoint = sorted(
-                checkpoint_list, key=lambda x: int(x.split("_")[-1].split(".")[0])
-            )[-1]
-            logger.info(
-                f"Found checkpoint {args.resume_from_checkpoint} for run {args.run_name}."
-            )
-    # TODO : resume from checkpoint
-    resume_from_epoch = global_step = 0
-    if args.resume_from_checkpoint is not None:
-        if args.rank == 0:
-            logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
-        checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
-
-        model_state_dict = model.state_dict()
-        state_disk = {k.replace('module.',''):v for k,v in checkpoint["model_state_dict"].items()}
-
-        update_model_state = {}
-        for key, val in state_disk.items():
-            if key in model_state_dict and model_state_dict[key].shape == val.shape:
-                update_model_state[key] = val
-            else:
-                logger.info(
-                    'Ignore weight %s: %s' % (key, str(val.shape))
-                )
-        model.load_state_dict(update_model_state,strict=False)
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
-        resume_from_epoch = checkpoint["epoch"] + 1
-        global_step = checkpoint["global_step"]
-    return resume_from_epoch, global_step
-
-def model_state_to_cpu(model_state):
-    model_state_cpu = type(model_state)()  # ordered dict
-    for key, val in model_state.items():
-        model_state_cpu[key] = val.cpu()
-    return model_state_cpu
-
-def get_checkpoint(model, del_grad=True):
-    if model is not None:
-        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-            state_dict = model_state_to_cpu(model.module.state_dict())
-            if del_grad:
-                for name, p in model.named_parameters():
-                    sn = name.replace('module.', '')
-                    if not p.requires_grad:
-                        del state_dict[sn]
-        else:
-            state_dict = model.state_dict()
-            if del_grad:
-                for name, p in model.named_parameters():
-                    if not p.requires_grad:
-                        del state_dict[name]
-    else:
-        state_dict = None
-
-    return state_dict
-
-def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step, min_val_loss):
-    if args.rank == 0:
-        if not os.path.exists(args.run_name):
-            os.makedirs(args.run_name)
-        checkpoint_dict = {
-            "epoch": epoch,
-            "min_val_loss": min_val_loss,
-            "global_step": global_step,
-            "model_state_dict": get_checkpoint(ddp_model),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "lr_scheduler_state_dict": lr_scheduler.state_dict(),
-        }
-        logger.info(f"Saving checkpoint to {args.run_name}/checkpoint_{epoch}.pt")
-        torch.save(checkpoint_dict, f"{args.run_name}/checkpoint_{epoch}.pt")
-        if args.delete_previous_checkpoint:
-            if epoch > 0:
-                os.remove(f"{args.run_name}/checkpoint_{epoch - 1}.pt")
-
-# def train_one_epoch_debug(
-#         args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
-# ):
-#     num_batches_per_epoch = data_loader.num_batches
-#     total_training_steps = num_batches_per_epoch * args.num_epochs
-#     data_loader = range(len(data_loader))
-#     for num_steps, batch_dict in tqdm(
-#             enumerate(data_loader),
-#             disable=args.rank != 0,
-#             total=total_training_steps,
-#             initial=(epoch * num_batches_per_epoch)
-#     ):
-#         global_step = num_steps + epoch * num_batches_per_epoch
-#         tb_log.add_scalar('train/loss', global_step, global_step)
-#     return global_step
-
-def train_one_epoch(
-        args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
-):
-    model.train()
-
-    num_batches_per_epoch = data_loader.num_batches
-    total_training_steps = num_batches_per_epoch * args.num_epochs
-
-    autocast = get_autocast(args.precision)
-    cast_dtype = get_cast_dtype(args.precision)
-
-    # setup logging
-    step_time_m = (
-        AverageMeter()
-    )  # time for one optimizer step (> 1 batch if using gradient accum)
-    data_time_m = (
-        AverageMeter()
-    )  # avg time to load one batch of Data (= 1 batch regardless of gradient accum)
-    end = time.time()
-
-    for num_steps, batch_dict in tqdm(
-        enumerate(data_loader),
-        disable=args.rank!=0,
-        total=total_training_steps,
-        initial=(epoch*num_batches_per_epoch)
-    ):
-        data_time_m.update(time.time() - end)
-        global_step = num_steps + epoch * num_batches_per_epoch
-
-        #### FORWARD PASS ####
-        if batch_dict.get('imgs',None) is not None:
-            # (B, T_img=12, F, C, H, W) with F=1
-            #  Batch_size, T_img: num_media=12, F: num_frames
-            input_imgs = batch_dict['imgs'].to(device_id, dtype=cast_dtype, non_blocking=True)
-            use_local_vision = 'none'
-            input_imgs = input_imgs.unsqueeze(2)
-        elif batch_dict.get('img_feats',None) is not None:
-            input_imgs = batch_dict['img_feats'].to(device_id, dtype=cast_dtype, non_blocking=True)
-            use_local_vision = 'feature'
-        else:
-            raise NotImplementedError
-
-        input_text = tokenizer(
-            batch_dict['input_text'],
-            max_length=args.max_length,
-            padding="longest",
-            truncation="only_first",
-            return_tensors="pt",
-        )
-        input_ids = input_text['input_ids'].to(device_id, dtype=cast_dtype, non_blocking=True)
-        attention_mask = input_text['attention_mask'].to(
-            device_id, dtype=cast_dtype, non_blocking=True
-        )
-
-        labels = input_ids.clone()
-        labels[labels == tokenizer.pad_token_id] = -100 # <PAD> LLaMa
-        labels[:, 0] = -100 # first token <s> or <PAD>
-        labels[labels == args.media_token_id] = -100
-
-        # question->answer:
-        answer_labels = labels.clone()
-        for bs in range(labels.shape[0]):
-            # LLaMa: tokenizer.decode([0,1,2,32000,32001,32002])
-            #   >>> '<unk><s></s><|endofchunk|><image><PAD>'
-            # st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
-            ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
-            ed_idx += 2  # "?Answer:"
-            answer_labels[bs,:ed_idx] = -100
-
-        labels.to(device_id)
-        answer_labels.to(device_id)
-
-        with autocast():
-            output = model(
-                vision_x=input_imgs,
-                lang_x=input_ids,
-                attention_mask=attention_mask,
-                labels=answer_labels,
-                use_local_vision=use_local_vision,
-            )
-            loss = output[0]
-            logits = output[1]
-        divided_loss = loss / args.gradient_accumulation_steps
-        divided_loss.backward()
-
-        #### MASK GRADIENTS FOR EMBEDDINGS ####
-        # Note (anas): Do not apply weight decay to embeddings as it will break this function.
-        def mask_embedding(m):
-            if isinstance(m, torch.nn.Embedding) and m.weight.requires_grad:
-                zero_mask = torch.zeros_like(m.weight.grad)
-                zero_mask[args.media_token_id] = torch.ones_like(zero_mask[args.media_token_id])
-                zero_mask[args.endofchunk_token_id] = torch.ones_like(
-                    zero_mask[args.endofchunk_token_id]
-                )
-                m.weight.grad = m.weight.grad * zero_mask
-
-        model.apply(mask_embedding)
-
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
-        # step optimizer and log
-        if (((num_steps + 1) % args.gradient_accumulation_steps) == 0) or (
-            num_steps == num_batches_per_epoch - 1
-        ):
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
-
-            # step time and reset end outside of rank 0
-            step_time_m.update(time.time() - end)
-            end = time.time()
-
-            if tb_log is not None:
-                try:
-                    cur_lr = float(optimizer.lr)
-                except:
-                    cur_lr = optimizer.param_groups[0]['lr']
-
-                tb_log.add_scalar('meta_data/learning_rate',cur_lr,global_step)
-                tb_log.add_scalar('train/loss', loss.item(), global_step)
-
-        # Log loss to console
-        if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
-            logger.info(
-                f"Step {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. Loss: {loss.item():.3f}"
-            )
-
-    return global_step
-
-
-def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb_log=None,logger=None):
-    model.eval()
-
-    autocast = get_autocast(args.precision)
-    cast_dtype = get_cast_dtype(args.precision)
-
-    loss_metric = Metrics()
-    predictions = dict()
-
-    with torch.no_grad():
-        for idx, batch_dict in tqdm(
-                enumerate(data_loader),
-                total=data_loader.num_batches,
-                disable=args.rank != 0,
-                desc="validation {}:".format(args.split)
-        ):
-            loss = forward_with_loss(
-                args=args,
-                model=model,
-                batch_dict=batch_dict,
-                tokenizer=tokenizer,
-                device_id=device_id,
-                cast_dtype=cast_dtype
-            )
-            loss_metric.accumulate(loss.data.item())
-
-            # cur_preds = inference_text_generation(
-            #     args=args,
-            #     model=model,
-            #     batch_dict=batch_dict,
-            #     tokenizer=tokenizer,
-            #     global_cfg=global_cfg,
-            #     device_id=device_id,
-            #     cast_dtype=cast_dtype
-            # )
-            # predictions.update(cur_preds)
-
-    val_loss = loss_metric.average
-    return val_loss,None
 
 def main():
     args = read_args()
@@ -361,6 +69,7 @@ def main():
     endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
         "input_ids"
     ][-1]
+    ### "<image> .Question:"
     question_token_id = tokenizer(".Question", add_special_tokens=False)["input_ids"][-1]
     answer_token_id = tokenizer("?Answer", add_special_tokens=False)["input_ids"][-1]
 
@@ -444,7 +153,6 @@ def main():
         ddp_model.train()
         min_val_loss = 1e+10
         for epoch in range(resume_from_epoch, args.num_epochs):
-
             global_step = train_one_epoch(
                 args=args,
                 model=ddp_model,
@@ -458,36 +166,33 @@ def main():
                 logger=logger
             )
 
-            if args.trainval_step > 0:
-                if epoch % args.trainval_step == 0:
-                    val_loss,val_pred_dict = val_one_epoch(
-                        args=args,
-                        model=ddp_model,
-                        epoch=epoch,
-                        data_loader=val_dataloader,
-                        tokenizer=tokenizer,
-                        global_cfg=global_cfg,
-                        device_id=device_id,
-                        tb_log=tb_log,
-                        logger=logger
-                    )
-                    # val_pred_file = Path(args.run_name) / (
-                    #             'val_pred_{}-{}.json'.format(
-                    #                 datetime.datetime.now().strftime('%Y%m%d-%H%M%S'),
-                    #                 epoch
-                    #             ))
-                    # with open(str(val_pred_file),'w') as f:
-                    #     json.dump(val_pred_dict,f,indent=2)
+            ### train with validation
+            if args.trainval_step > 0 and epoch % args.trainval_step == 0:
+                val_loss,val_pred_dict = val_one_epoch(
+                    args=args,
+                    model=ddp_model,
+                    epoch=epoch,
+                    data_loader=val_dataloader,
+                    tokenizer=tokenizer,
+                    global_cfg=global_cfg,
+                    device_id=device_id,
+                    tb_log=tb_log,
+                    logger=logger
+                )
+                # val_pred_file = Path(args.run_name) / (
+                #             'val_pred_{}-{}.json'.format(
+                #                 datetime.datetime.now().strftime('%Y%m%d-%H%M%S'),
+                #                 epoch
+                #             ))
+                # with open(str(val_pred_file),'w') as f:
+                #     json.dump(val_pred_dict,f,indent=2)
 
-                    logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
-                else:
-                    val_loss = 0
+                logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
             else:
                 val_loss = 0
 
-            if args.rank == 0 and epoch % 2 ==0: #and min_val_loss >= val_loss:
+            if args.rank == 0 and epoch % args.save_ckpt_step == 0:
                 min_val_loss = val_loss
-                # save checkpoint
                 save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step, min_val_loss)
 
         if args.rank == 0:
@@ -495,36 +200,9 @@ def main():
             if not os.path.exists(args.run_name):
                 os.makedirs(args.run_name)
             torch.save(get_checkpoint(ddp_model), f"{args.run_name}/final_weights.pt")
-
-    elif 'val' in args.split: # Single-GPU Val
-        if not args.text_generate:
-
-            logger.info("**************************** Validation: {} ****************************".format(args.split))
-
-            model = model.to(device_id)
-
-            validation(
-                args=args,
-                global_cfg=global_cfg,
-                model=model,
-                tokenizer=tokenizer,
-                device_id=device_id.index
-            )
-        else:
-
-            logger.info("**************************** text generate ****************************")
-
-            model = model.to(device_id)
-
-            text_generate(
-                args=args,
-                global_cfg=global_cfg,
-                model=model,
-                tokenizer=tokenizer,
-                device_id=device_id.index
-            )
     else:
-        raise NotImplementedError
+        print("[ERROR] Please use \"eval_net.py\" for evaluation")
+        exit()
 
 if __name__ == "__main__":
     main()

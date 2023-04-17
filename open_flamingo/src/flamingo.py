@@ -1,7 +1,8 @@
 import torch
 from einops import rearrange
 from torch import nn
-
+from transformers.utils import ModelOutput
+from typing import Any, Dict, List, Optional, Tuple, Union
 from .helpers import PerceiverResampler
 
 
@@ -46,7 +47,7 @@ class Flamingo(nn.Module):
             use_media_placement_augmentation=self.use_media_placement_augmentation,
         )
 
-    def forward(
+    def forward_train(
         self,
         vision_x: torch.Tensor,
         lang_x: torch.Tensor,
@@ -56,7 +57,7 @@ class Flamingo(nn.Module):
         clear_conditioned_layers: bool = True,
         past_key_values=None,
         use_cache: bool = False,
-        use_local_vision: bool = True,
+        use_local_vision: str = 'none',
     ):
         """
         Forward pass of Flamingo.
@@ -80,14 +81,15 @@ class Flamingo(nn.Module):
                 documentation in Hugging Face CausalLM models.
             use_local_vision: VLN-DUET local image features.
         """
+
         if use_local_vision == 'feature':
             self._encode_vision_with_local(vision_x)
         elif use_local_vision == 'image':
             self._encode_multi_view_image(vision_x)
         else:
             assert (
-                vision_x is not None
-            ) or use_cached_vision_x, (
+                           vision_x is not None
+                   ) or use_cached_vision_x, (
                 "Must provide either vision_x or use_cached_vision_x to True."
             )
 
@@ -95,7 +97,7 @@ class Flamingo(nn.Module):
                 # Case: use cached; vision_x should be cached and other
                 # vision-related inputs should not be provided.
                 assert (
-                    vision_x is None
+                        vision_x is None
                 ), "Expect vision_x to be None when use_cached_vision_x is True."
                 assert self.lang_encoder.is_conditioned()
 
@@ -115,6 +117,47 @@ class Flamingo(nn.Module):
             self.lang_encoder.clear_conditioned_layers()
 
         return output
+
+    def forward(
+        self,
+        vision_x: torch.Tensor,
+        lang_x: torch.Tensor,
+        attention_mask: torch.Tensor = None,
+        labels: torch.Tensor = None,
+        use_cached_vision_x: bool = False,
+        clear_conditioned_layers: bool = True,
+        past_key_values=None,
+        use_cache: bool = False,
+        use_local_vision: str = 'none',
+        mode: str = 'train',
+        max_length: int = 20,
+    ):
+        if mode == 'train':
+            return self.forward_train(
+                vision_x=vision_x,
+                lang_x=lang_x,
+                attention_mask=attention_mask,
+                labels=labels,
+                use_cached_vision_x=use_cached_vision_x,
+                clear_conditioned_layers=clear_conditioned_layers,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                use_local_vision=use_local_vision
+            )
+        elif mode == 'generate':
+            output_ids = self.greedy_inference(
+                vision_x=vision_x,
+                input_ids=lang_x,
+                attention_mask=attention_mask,
+                labels=labels,
+                use_cached_vision_x=use_cached_vision_x,
+                clear_conditioned_layers=clear_conditioned_layers,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                use_local_vision=use_local_vision,
+                max_length=max_length,
+            )
+            return output_ids
 
     def generate(
         self,
@@ -228,8 +271,6 @@ class Flamingo(nn.Module):
         #     # Multi-View: 12 * (B,1,64,1024)
         #     all_vision_feats.append(vision_x)
 
-
-
     def _encode_vision_x(self, vision_x: torch.Tensor):
         """
         Compute media tokens from vision input by passing it through vision encoder and conditioning language model.
@@ -255,3 +296,127 @@ class Flamingo(nn.Module):
 
         for layer in self.lang_encoder._get_decoder_layers():
             layer.condition_vis_x(vision_x)
+
+    def prepare_inputs_for_generation(
+        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+    ):
+        if past_key_values:
+            input_ids = input_ids[:, -1:]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "attention_mask": attention_mask,
+            }
+        )
+        return model_inputs
+
+    def _update_model_kwargs_for_generation(
+        self,
+        outputs: ModelOutput,
+        model_kwargs: Dict[str, Any],
+        is_encoder_decoder: bool = False,
+        standardize_cache_format: bool = False,
+    ) -> Dict[str, Any]:
+        # update past_key_values
+        model_kwargs["past_key_values"] = outputs.past_key_values
+
+        # update token_type_ids with last value
+        if "token_type_ids" in model_kwargs:
+            token_type_ids = model_kwargs["token_type_ids"]
+            model_kwargs["token_type_ids"] = torch.cat([token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
+
+        if not is_encoder_decoder:
+            # update attention mask
+            if "attention_mask" in model_kwargs:
+                attention_mask = model_kwargs["attention_mask"]
+                model_kwargs["attention_mask"] = torch.cat(
+                    [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
+                )
+        else:
+            # update decoder attention mask
+            raise NotImplementedError
+
+        return model_kwargs
+
+    def greedy_inference(
+            self,
+            vision_x: torch.Tensor,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor = None,
+            labels: torch.Tensor = None,
+            use_cached_vision_x: bool = False,
+            clear_conditioned_layers: bool = True,
+            past_key_values=None,
+            use_cache: bool = False,
+            use_local_vision: str = 'none',
+            max_length: int = 20,
+    ):
+        model_kwargs = {
+            'attention_mask': attention_mask,
+            'use_cache': True,
+        }
+        output_attentions = False
+        output_hidden_states = False
+        scores = None
+
+        self._encode_vision_x(vision_x=vision_x)
+
+        pad_token_id = self.lang_encoder.generation_config.pad_token_id
+        eos_token_id = self.eoc_token_id
+        if isinstance(eos_token_id, int):
+            eos_token_id = [eos_token_id]
+        eos_token_id_tensor = torch.tensor(eos_token_id).to(input_ids.device) if eos_token_id is not None else None
+
+        # keep track of which sequences are already finished
+        unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
+
+        while True:
+            # prepare model inputs
+            model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+
+            # forward pass to get next token
+            outputs = self.lang_encoder(
+                **model_inputs,
+                return_dict=True,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+            )
+
+            next_token_logits = outputs.logits[:, -1, :]
+            next_tokens_scores = next_token_logits
+
+            # argmax
+            next_tokens = torch.argmax(next_tokens_scores, dim=-1)
+
+            # finished sentences should have their next token be a padding token
+            if eos_token_id is not None:
+                if pad_token_id is None:
+                    raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
+                next_tokens = next_tokens * unfinished_sequences + pad_token_id * (1 - unfinished_sequences)
+
+            # update generated ids, model inputs, and length for next step
+            input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
+
+            model_kwargs = self._update_model_kwargs_for_generation(
+                outputs, model_kwargs, is_encoder_decoder=False
+            )
+
+            # if eos_token was found in one sentence, set sentence to finished
+            if eos_token_id_tensor is not None:
+                unfinished_sequences = unfinished_sequences.mul(
+                    next_tokens.tile(eos_token_id_tensor.shape[0], 1).ne(eos_token_id_tensor.unsqueeze(1)).prod(dim=0)
+                )
+
+            # stop when each sentence is finished, or if we exceed the maximum length
+            if unfinished_sequences.max() == 0 or input_ids.shape[-1] >= max_length:
+                break
+
+        return input_ids

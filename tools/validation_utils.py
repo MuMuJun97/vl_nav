@@ -202,15 +202,27 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
                 device_id, dtype=cast_dtype, non_blocking=True
             )
 
-            with torch.inference_mode():
-                outputs = model.generate(
-                    input_imgs.to(device_id if device_id >= 0 else "cpu"),
-                    input_ids.to(device_id if device_id >= 0 else "cpu"),
-                    attention_mask=attention_mask.to(device_id if device_id >= 0 else "cpu"),
-                    max_new_tokens=global_cfg.Inference.max_new_tokens,
-                    num_beams=global_cfg.Inference.num_beams,
-                    length_penalty=global_cfg.Inference.length_penalty,
-                )
+            ############### greedy inference | text generation ###############
+            # Greedy Inference
+            outputs = model(
+                vision_x=input_imgs,
+                lang_x=input_ids,
+                attention_mask=attention_mask,
+                mode='generate',
+                max_length=global_cfg.Inference.max_new_tokens,
+            )
+
+            # Single-GPU Inference
+            # [1] global_cfg.Inference.num_beams=1 greedy generation
+            # outputs = model.generate(
+            #     input_imgs.to(device_id if device_id >= 0 else "cpu"),
+            #     input_ids.to(device_id if device_id >= 0 else "cpu"),
+            #     attention_mask=attention_mask.to(device_id if device_id >= 0 else "cpu"),
+            #     max_new_tokens=global_cfg.Inference.max_new_tokens,
+            #     num_beams=global_cfg.Inference.num_beams,
+            #     length_penalty=global_cfg.Inference.length_penalty,
+            # )
+
             outputs = outputs[:, len(input_ids[0]):]
 
             ############## VALIDATION LOSS ##############
@@ -386,3 +398,194 @@ def forward_with_loss(
     )[0]
 
     return loss
+
+
+# def train_one_epoch_debug(
+#         args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
+# ):
+#     num_batches_per_epoch = data_loader.num_batches
+#     total_training_steps = num_batches_per_epoch * args.num_epochs
+#     data_loader = range(len(data_loader))
+#     for num_steps, batch_dict in tqdm(
+#             enumerate(data_loader),
+#             disable=args.rank != 0,
+#             total=total_training_steps,
+#             initial=(epoch * num_batches_per_epoch)
+#     ):
+#         global_step = num_steps + epoch * num_batches_per_epoch
+#         tb_log.add_scalar('train/loss', global_step, global_step)
+#     return global_step
+
+def train_one_epoch(
+    args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
+):
+    model.train()
+    loss_metric = Metrics()
+
+    num_batches_per_epoch = data_loader.num_batches
+    total_training_steps = num_batches_per_epoch * args.num_epochs
+
+    autocast = get_autocast(args.precision)
+    cast_dtype = get_cast_dtype(args.precision)
+
+    # setup logging
+    step_time_m = (
+        AverageMeter()
+    )  # time for one optimizer step (> 1 batch if using gradient accum)
+    data_time_m = (
+        AverageMeter()
+    )  # avg time to load one batch of Data (= 1 batch regardless of gradient accum)
+    end = time.time()
+
+    for num_steps, batch_dict in tqdm(
+        enumerate(data_loader),
+        disable=args.rank!=0,
+        total=total_training_steps,
+        initial=(epoch*num_batches_per_epoch)
+    ):
+        data_time_m.update(time.time() - end)
+        global_step = num_steps + epoch * num_batches_per_epoch
+
+        #### FORWARD PASS ####
+        if batch_dict.get('imgs',None) is not None:
+            # (B, T_img=12, F, C, H, W) with F=1
+            #  Batch_size, T_img: num_media=12, F: num_frames
+            input_imgs = batch_dict['imgs'].to(device_id, dtype=cast_dtype, non_blocking=True)
+            use_local_vision = 'none'
+            input_imgs = input_imgs.unsqueeze(2)
+        elif batch_dict.get('img_feats',None) is not None:
+            input_imgs = batch_dict['img_feats'].to(device_id, dtype=cast_dtype, non_blocking=True)
+            use_local_vision = 'feature'
+        else:
+            raise NotImplementedError
+
+        input_text = tokenizer(
+            batch_dict['input_text'],
+            max_length=args.max_length,
+            padding="longest",
+            truncation="only_first",
+            return_tensors="pt",
+        )
+        input_ids = input_text['input_ids'].to(device_id, dtype=cast_dtype, non_blocking=True)
+        attention_mask = input_text['attention_mask'].to(
+            device_id, dtype=cast_dtype, non_blocking=True
+        )
+
+        labels = input_ids.clone()
+        labels[labels == tokenizer.pad_token_id] = -100 # <PAD> LLaMa
+        labels[:, 0] = -100 # first token <s> or <PAD>
+        labels[labels == args.media_token_id] = -100
+
+        # question->answer:
+        answer_labels = labels.clone()
+        for bs in range(labels.shape[0]):
+            # LLaMa: tokenizer.decode([0,1,2,32000,32001,32002])
+            #   >>> '<unk><s></s><|endofchunk|><image><PAD>'
+            # st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
+            ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
+            ed_idx += 2  # "?Answer:"
+            answer_labels[bs,:ed_idx] = -100
+
+        labels.to(device_id)
+        answer_labels.to(device_id)
+
+        with autocast():
+            output = model(
+                vision_x=input_imgs,
+                lang_x=input_ids,
+                attention_mask=attention_mask,
+                labels=answer_labels,
+                use_local_vision=use_local_vision,
+            )
+            loss = output[0]
+            logits = output[1]
+        divided_loss = loss / args.gradient_accumulation_steps
+        divided_loss.backward()
+
+        #### MASK GRADIENTS FOR EMBEDDINGS ####
+        # Note (anas): Do not apply weight decay to embeddings as it will break this function.
+        def mask_embedding(m):
+            if isinstance(m, torch.nn.Embedding) and m.weight.requires_grad:
+                zero_mask = torch.zeros_like(m.weight.grad)
+                zero_mask[args.media_token_id] = torch.ones_like(zero_mask[args.media_token_id])
+                zero_mask[args.endofchunk_token_id] = torch.ones_like(
+                    zero_mask[args.endofchunk_token_id]
+                )
+                m.weight.grad = m.weight.grad * zero_mask
+
+        model.apply(mask_embedding)
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+        # step optimizer and log
+        if (((num_steps + 1) % args.gradient_accumulation_steps) == 0) or (
+            num_steps == num_batches_per_epoch - 1
+        ):
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+
+            loss_metric.accumulate(loss.data.item())
+
+            # step time and reset end outside of rank 0
+            step_time_m.update(time.time() - end)
+            end = time.time()
+
+            if tb_log is not None:
+                try:
+                    cur_lr = float(optimizer.lr)
+                except:
+                    cur_lr = optimizer.param_groups[0]['lr']
+
+                tb_log.add_scalar('meta_data/learning_rate',cur_lr,global_step)
+                tb_log.add_scalar('train/loss', loss_metric.average, global_step)
+
+        # Log loss to console
+        if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
+            logger.info(
+                f"\nStep {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. "
+                f"\nAverage Loss: {loss_metric.average:.3f}"
+            )
+
+    return global_step
+
+
+def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb_log=None,logger=None):
+    model.eval()
+
+    autocast = get_autocast(args.precision)
+    cast_dtype = get_cast_dtype(args.precision)
+
+    loss_metric = Metrics()
+    predictions = dict()
+
+    with torch.no_grad():
+        for idx, batch_dict in tqdm(
+                enumerate(data_loader),
+                total=data_loader.num_batches,
+                disable=args.rank != 0,
+                desc="validation {}:".format(args.split)
+        ):
+            loss = forward_with_loss(
+                args=args,
+                model=model,
+                batch_dict=batch_dict,
+                tokenizer=tokenizer,
+                device_id=device_id,
+                cast_dtype=cast_dtype
+            )
+            loss_metric.accumulate(loss.data.item())
+
+            # cur_preds = inference_text_generation(
+            #     args=args,
+            #     model=model,
+            #     batch_dict=batch_dict,
+            #     tokenizer=tokenizer,
+            #     global_cfg=global_cfg,
+            #     device_id=device_id,
+            #     cast_dtype=cast_dtype
+            # )
+            # predictions.update(cur_preds)
+
+    val_loss = loss_metric.average
+    return val_loss,None

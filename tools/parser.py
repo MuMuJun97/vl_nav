@@ -19,13 +19,28 @@ def read_args():
     parser.add_argument('--cfg_file', type=str, default="tools/cfgs/datasets/imgdatasets.yaml", help='dataset configs')
     parser.add_argument('--img_feats', type=str, default="vit_imagenet", help='dataset configs')
     parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='object features')
+
     parser.add_argument('--split', type=str, default="train", help='train, val, test')
     parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
+
+    ############# TRAINING #############
+    # Sum of gradient optimization batch size
+    parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument('--trainval_step', type=int, default=0, help='train and eval step')
+    parser.add_argument('--save_ckpt_step', type=int, default=5, help='save ckpt step')
+    parser.add_argument(
+        "--delete_previous_checkpoint",
+        action="store_true",
+        help="delete previous checkpoint when saving new checkpoint",
+    )
+
+    ############# EVAL #############
     parser.add_argument('--text_generate', default=False, action="store_true", help='text generate')
     parser.add_argument('--generate_split', type=str, default="train", help='train,val_unseen,')
-    parser.add_argument('--generate_start_index', type=int, default=20000, help='start index')
+    parser.add_argument('--generate_start_index', type=int, default=0, help='start index')
     parser.add_argument('--generate_nums', type=int, default=40, help='text generate nums')
+
+    ############# MODEL #############
     parser.add_argument('--unfreeze_llm', type=bool, default=False, help='unfreeze language model')
 
     ############# FLAMINGO #############
@@ -41,24 +56,21 @@ def read_args():
     parser.add_argument(
         "--cross_attn_every_n_layers",
         type=int,
-        default=16, # LLaMa-7B cross_attn_every_n_layers=4; OPT-1.3B 1;
+        default=8, # LLaMa-7B cross_attn_every_n_layers=4; OPT-1.3B 1;
         help="how often to add a cross-attention layer after each transformer layer",
     )
     parser.add_argument(
         "--run_name",
         type=str,
-        default="llmNav",
+        default="Pretraining",
         help="used to name saving directory and wandb run",
     )
-    parser.add_argument("--use_media_placement_augmentation", type=bool, default=True) # False
+    parser.add_argument("--use_media_placement_augmentation", type=bool, default=True)
     parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--num_epochs", type=int, default=40)
     parser.add_argument(
-        "--logging_steps", type=int, default=2, help="log loss every n steps"
+        "--logging_steps", type=int, default=1000, help="log loss every n steps"
     )
-
-    # Sum of gradient optimization batch size
-    parser.add_argument("--batch_size", type=int, default=2)
 
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument(
@@ -67,11 +79,7 @@ def read_args():
         help="path to checkpoint to resume from, this should contain model, optimizer, and lr_scheduler states",
         default=None,
     )
-    parser.add_argument(
-        "--delete_previous_checkpoint",
-        action="store_true",
-        help="delete previous checkpoint when saving new checkpoint",
-    )
+
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--learning_rate", default=1e-4, type=float)
     parser.add_argument(
@@ -82,7 +90,7 @@ def read_args():
     )
 
     parser.add_argument("--warmup_steps", default=5000, type=int)
-    parser.add_argument("--weight_decay", default=0.1, type=float)
+    parser.add_argument("--weight_decay", default=0.05, type=float)
     parser.add_argument(
         "--precision",
         choices=["amp_bf16", "amp_bfloat16", "bf16", "fp16", "fp32"],
