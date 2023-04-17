@@ -58,6 +58,7 @@ def main():
         cross_attn_every_n_layers=args.cross_attn_every_n_layers, # 1
         use_local_files=args.offline, # False
         use_media_placement_augmentation=args.use_media_placement_augmentation, # True
+        unfreeze_llm=args.unfreeze_llm,  # unfreeze language model
     )
 
     ################### Word Tokens ###################
@@ -110,10 +111,12 @@ def main():
         global_cfg=global_cfg,
         model=ddp_model,
         tokenizer=tokenizer,
-        device_id=device_id
+        device_id=device_id,
+        logger=logger,
     )
     val_pred_file = Path(args.run_name) / (
-        'val_pred_{}.json'.format(
+        'split_{}_generate_pred_{}.json'.format(
+            args.generate_split,
             datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         ))
     with open(str(val_pred_file), 'w') as f:

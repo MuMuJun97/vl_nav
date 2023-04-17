@@ -11,6 +11,7 @@ from tqdm import tqdm
 from tools.train.train_utils import get_autocast, get_cast_dtype, AverageMeter
 from dataset.base_dataset import BaseDataset, build_dataloader
 from tools.common_utils import all_gather
+from tools.parser import random_seed
 
 class Metrics(object):
     def __init__(self):
@@ -131,18 +132,22 @@ def validation(args, global_cfg, model, tokenizer, device_id):
             loss_metric.accumulate(loss.data.item())
 
 
-def text_generate(args, global_cfg, model, tokenizer, device_id):
+def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
     """
     @param args:
     @param global_cfg:
     @param model:
     @param tokenizer:
     @param device_id: 0
+    @param logger: log message
     """
+    logger.info("*************** generate text | {} split ***************".format(args.generate_split))
+
+    # eval: if split == 'train', set training=True to keep the same train-dataset settings.
     dataset = BaseDataset(
         config=global_cfg.Dataset,
         split=args.generate_split,
-        training=False, # False if args.generate_split != 'train' else True
+        training=False if args.generate_split != 'train' else True,
         generate_start_index=args.generate_start_index
     )
     dataset, dataloader, sampler = build_dataloader(
@@ -150,8 +155,11 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
         batch_size=args.batch_size,
         dist=args.distributed,
         workers=args.workers,
-        training=False # if args.generate_split != 'train' else True
+        training=False if args.generate_split != 'train' else True,
     )
+
+    # Keep the seed the same as it was during training: train_net.py
+    random_seed(args.seed, args.rank)
 
     autocast = get_autocast(args.precision)
     cast_dtype = get_cast_dtype(args.precision)
@@ -207,7 +215,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
 
             ############### greedy inference | text generation ###############
             # Greedy Inference
-            outputs = model(
+            generate_outputs = model(
                 vision_x=input_imgs,
                 lang_x=input_ids,
                 attention_mask=attention_mask,
@@ -226,14 +234,14 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
             #     length_penalty=global_cfg.Inference.length_penalty,
             # )
 
-            outputs = outputs[:, len(input_ids[0]):]
+            generate_outputs = generate_outputs[:, len(input_ids[0]):]
 
             ############## VALIDATION LOSS ##############
             input_text = tokenizer(
                 batch_dict['input_text'],
                 max_length=args.max_length,
                 padding="longest",
-                truncation=True,  # "only_first"?train
+                truncation="only_first", # True,  # "only_first"?train
                 return_tensors="pt",
             )
             input_ids = input_text['input_ids'].to(device_id, dtype=cast_dtype, non_blocking=True)
@@ -244,35 +252,40 @@ def text_generate(args, global_cfg, model, tokenizer, device_id):
             labels[labels == tokenizer.pad_token_id] = -100
             labels[:, 0] = -100
             labels[labels == args.media_token_id] = -100
+
             # question->answer:
             answer_labels = labels.clone()
             for bs in range(labels.shape[0]):
-                st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
+                # LLaMa: tokenizer.decode([0,1,2,32000,32001,32002])
+                #   >>> '<unk><s></s><|endofchunk|><image><PAD>'
+                # st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
                 ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
                 ed_idx += 2  # "?Answer:"
                 answer_labels[bs, :ed_idx] = -100
 
             # labels.to(device_id)
             answer_labels.to(device_id)
-
-            loss = model(
-                vision_x=input_imgs,
-                lang_x=input_ids,
-                attention_mask=attention_mask,
-                labels=answer_labels,
-                use_local_vision=use_local_vision,
-            )[0]
+            ####### Forward, Compute Loss #######
+            with autocast():
+                output = model(
+                    vision_x=input_imgs,
+                    lang_x=input_ids,
+                    attention_mask=attention_mask,
+                    labels=answer_labels,
+                    use_local_vision=use_local_vision,
+                )
+                loss = output[0]
+                logits = output[1]
             loss_metric.accumulate(loss.data.item())
 
-            batch_pred = dict()
-            for bs in range(outputs.shape[0]):
-                sample_idx = batch_dict['sample_idx'][bs]
-                batch_pred[sample_idx] = dict()
-                batch_pred[sample_idx]['full_text'] = batch_dict['input_text'][bs]
-                batch_pred[sample_idx]['pred_text'] = tokenizer.batch_decode(outputs, skip_special_tokens=True)[bs]
-                batch_pred[sample_idx]['input_answer_text'] = input_answer_text[bs]
-                batch_pred[sample_idx]['mean_loss'] = loss.data.item()
-            predictions.update(batch_pred)
+            ####### Loss -> Text Generation #######
+            batch_pred = train_with_generate(
+                args, batch_dict, tokenizer, logits, loss, answer_labels, generate_outputs
+            )
+            all_batch_pred = all_gather(batch_pred)
+            if args.rank == 0:
+                for per_pred in all_batch_pred:
+                    predictions.update(per_pred)
 
     val_loss = loss_metric.average
     predictions['val_mean_loss'] = val_loss
@@ -419,7 +432,7 @@ def forward_with_loss(
 #         tb_log.add_scalar('train/loss', global_step, global_step)
 #     return global_step
 
-def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels):
+def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels,generate_outputs=None):
     """
     Args:
         args:
@@ -456,10 +469,21 @@ def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels):
 
             sample_idx = batch_dict['sample_idx'][bs]
             batch_pred[sample_idx] = dict()
-            batch_pred[sample_idx]['full_text'] = batch_dict['input_text'][bs]
-            batch_pred[sample_idx]['pred_text'] = \
+            batch_pred[sample_idx]['_gt_full_text'] = batch_dict['input_text'][bs]
+
+            ### input: full length sequence (include question + answer)
+            batch_pred[sample_idx]['pred_answer_text'] = \
                 tokenizer.decode(pred_tokens, skip_special_tokens=False)
-            batch_pred[sample_idx]['input_answer_text'] = input_answer_text[bs]
+
+            ### input: prefix generate input sequence (only question, without answer)
+            batch_pred[sample_idx]['generate_answer_text'] = \
+                tokenizer.decode(generate_outputs[bs], skip_special_tokens=False)
+
+            question_text = input_question_text[bs][input_question_text[bs].find("Question"):].replace(
+                "Answer:", ""
+            )
+            batch_pred[sample_idx]['_gt_question_text'] = question_text
+            batch_pred[sample_idx]['_gt_answer_text'] = input_answer_text[bs]
             batch_pred[sample_idx]['mean_loss'] = loss.data.item()
 
     return batch_pred

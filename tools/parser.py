@@ -39,7 +39,8 @@ def read_args():
     parser.add_argument('--text_generate', default=False, action="store_true", help='text generate')
     parser.add_argument('--generate_split', type=str, default="train", help='train,val_unseen,')
     parser.add_argument('--generate_start_index', type=int, default=0, help='start index')
-    parser.add_argument('--generate_nums', type=int, default=40, help='text generate nums')
+    parser.add_argument('--generate_nums', type=int, default=40,
+                        help='text generate nums; generate_nums = 0: eval all data')
 
     ############# MODEL #############
     parser.add_argument('--unfreeze_llm', type=bool, default=False, help='unfreeze language model')

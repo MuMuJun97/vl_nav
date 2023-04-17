@@ -371,7 +371,7 @@ class Flamingo(nn.Module):
         self._encode_vision_x(vision_x=vision_x)
 
         pad_token_id = self.lang_encoder.generation_config.pad_token_id
-        eos_token_id = self.eoc_token_id
+        eos_token_id = self.eoc_token_id # STOP Token
         if isinstance(eos_token_id, int):
             eos_token_id = [eos_token_id]
         eos_token_id_tensor = torch.tensor(eos_token_id).to(input_ids.device) if eos_token_id is not None else None
@@ -412,6 +412,7 @@ class Flamingo(nn.Module):
 
             # if eos_token was found in one sentence, set sentence to finished
             if eos_token_id_tensor is not None:
+                # torch.ne: not equal
                 unfinished_sequences = unfinished_sequences.mul(
                     next_tokens.tile(eos_token_id_tensor.shape[0], 1).ne(eos_token_id_tensor.unsqueeze(1)).prod(dim=0)
                 )
