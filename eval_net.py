@@ -114,13 +114,15 @@ def main():
         device_id=device_id,
         logger=logger,
     )
-    val_pred_file = Path(args.run_name) / (
-        'split_{}_generate_pred_{}.json'.format(
-            args.generate_split,
-            datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        ))
-    with open(str(val_pred_file), 'w') as f:
-        json.dump(predictions, f, indent=2)
+
+    if args.rank == 0:
+        val_pred_file = Path(args.run_name) / (
+            'split_{}_generate_pred_{}.json'.format(
+                args.generate_split,
+                datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+            ))
+        with open(str(val_pred_file), 'w') as f:
+            json.dump(predictions, f, indent=2)
     logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
 
 
