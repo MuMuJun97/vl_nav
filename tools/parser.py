@@ -28,6 +28,7 @@ def read_args():
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument('--trainval_step', type=int, default=0, help='train and eval step')
     parser.add_argument('--save_ckpt_step', type=int, default=5, help='save ckpt step')
+    parser.add_argument('--train_with_generate', type=bool, default=False, help='train and save pred text')
     parser.add_argument(
         "--delete_previous_checkpoint",
         action="store_true",

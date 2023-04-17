@@ -7,7 +7,7 @@ import torch
 from tqdm import tqdm
 from tools.train.train_utils import get_autocast, get_cast_dtype, AverageMeter
 from dataset.base_dataset import BaseDataset, build_dataloader
-
+from tools.common_utils import all_gather
 
 class Metrics(object):
     def __init__(self):
@@ -333,7 +333,7 @@ def inference_text_generation(
         sample_idx = batch_dict['sample_idx'][bs]
         predictions[sample_idx] = dict()
         predictions[sample_idx]['input_text'] = batch_dict['input_text'][bs]
-        predictions[sample_idx]['pred_text'] = tokenizer.batch_decode(outputs, skip_special_tokens=True)[bs]
+        predictions[sample_idx]['pred_text'] = tokenizer.batch_decode(outputs, skip_special_tokens=False)[bs]
         predictions[sample_idx]['input_answer_text'] = input_answer_text[bs]
 
     return predictions
@@ -416,6 +416,42 @@ def forward_with_loss(
 #         tb_log.add_scalar('train/loss', global_step, global_step)
 #     return global_step
 
+def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels):
+    """
+    Args:
+        args:
+        batch_dict:
+        tokenizer:
+        logits: predictions during training.
+        loss:
+
+    Returns:
+
+    """
+    batch_pred = dict()
+    with torch.no_grad():
+        input_question_text = deepcopy(batch_dict['input_text'])
+        input_answer_text = deepcopy(batch_dict['input_text'])
+        for bs in range(len(input_question_text)):
+            st_idx = input_question_text[bs].find('Answer:')
+            input_question_text[bs] = input_question_text[bs][:st_idx] + "Answer:"
+            input_answer_text[bs] = input_answer_text[bs][st_idx:].replace("Answer:", "")
+
+            answer_sdx = (answer_labels[bs] != -100).nonzero(as_tuple=True)[0][0]
+
+            answer_logits = logits[bs, answer_sdx:]
+            pred_tokens = torch.argmax(answer_logits, dim=-1)
+
+            sample_idx = batch_dict['sample_idx'][bs]
+            batch_pred[sample_idx] = dict()
+            batch_pred[sample_idx]['full_text'] = batch_dict['input_text'][bs]
+            batch_pred[sample_idx]['pred_text'] = \
+                tokenizer.decode(pred_tokens, skip_special_tokens=False)
+            batch_pred[sample_idx]['input_answer_text'] = input_answer_text[bs]
+            batch_pred[sample_idx]['mean_loss'] = loss.data.item()
+
+    return batch_pred
+
 def train_one_epoch(
     args,model,epoch,data_loader,tokenizer,optimizer,lr_scheduler,device_id,tb_log=None,logger=None
 ):
@@ -436,6 +472,7 @@ def train_one_epoch(
         AverageMeter()
     )  # avg time to load one batch of Data (= 1 batch regardless of gradient accum)
     end = time.time()
+    predictions = dict() if args.rank == 0 else None
 
     for num_steps, batch_dict in tqdm(
         enumerate(data_loader),
@@ -516,6 +553,15 @@ def train_one_epoch(
         model.apply(mask_embedding)
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+        if args.train_with_generate:
+            batch_pred = train_with_generate(
+                args,batch_dict,tokenizer,logits,loss,answer_labels
+            )
+            all_batch_pred = all_gather(batch_pred)
+            if args.rank == 0:
+                for per_pred in all_batch_pred:
+                    predictions.update(per_pred)
 
         # step optimizer and log
         if (((num_steps + 1) % args.gradient_accumulation_steps) == 0) or (
