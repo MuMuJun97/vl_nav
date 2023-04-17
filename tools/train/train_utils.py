@@ -97,8 +97,8 @@ def check_checkpoint(args,model,optimizer,lr_scheduler,logger):
                     'Ignore weight %s: %s' % (key, str(val.shape))
                 )
         model.load_state_dict(update_model_state,strict=False)
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"]) if optimizer is not None else None
+        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"]) if lr_scheduler is not None else None
         resume_from_epoch = checkpoint["epoch"] + 1
         global_step = checkpoint["global_step"]
     return resume_from_epoch, global_step
