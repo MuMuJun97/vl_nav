@@ -423,3 +423,66 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
         (len(stop_cases)/len(res_data)),len(stop_cases),len(res_data)
     ))
     return res_data
+
+
+def generate_direction_from_mp3d(navigable_loc, mode="all"):
+    item_idx = 0
+    res_data = []
+
+    if mode == "only_connect":
+        for scan,scan_dict in navigable_loc.items():
+            for viewpoint, viewpoint_dict in scan_dict.items():
+                viewpoint_direction_ids = []
+                for neighbor, neighbor_dict in viewpoint_dict.items():
+                    if neighbor == viewpoint:
+                        continue
+
+                    if neighbor_dict['pointId'] in viewpoint_direction_ids:
+                        continue
+                    else:
+                        viewpoint_direction_ids.append(neighbor_dict['pointId'])
+
+                    item = dict()
+                    item['sample_idx'] = item_idx
+                    item['scan'] = scan
+                    item['viewpoint'] = viewpoint
+                    item['neighbor'] = neighbor
+                    item['directionID'] = neighbor_dict['pointId']
+
+                    # qa type 2: give ViewID, ask instruction
+                    question_view2instr = "Question:{}".format(
+                        promptQAs['R2R']['view2instr']['question'].format(
+                            ViewID=item['directionID']
+                        )
+                    )
+
+                    item['qa'] = {
+                        'question_view2instr': question_view2instr,
+                    }
+                    res_data.append(item)
+                    item_idx += 1
+
+    if mode == "all":
+        for scan, scan_dict in navigable_loc.items():
+            for viewpoint, viewpoint_dict in scan_dict.items():
+                for direction_id in range(12):
+                    item = dict()
+                    item['sample_idx'] = item_idx
+                    item['scan'] = scan
+                    item['viewpoint'] = viewpoint
+                    item['directionID'] = direction_id
+
+                    # qa type 2: give ViewID, ask instruction
+                    question_view2instr = "Question:{}".format(
+                        promptQAs['R2R']['view2instr']['question'].format(
+                            ViewID=item['directionID']
+                        )
+                    )
+
+                    item['qa'] = {
+                        'question_view2instr': question_view2instr,
+                    }
+                    res_data.append(item)
+                    item_idx += 1
+    print('[INFO] select {} samples from mp3d'.format(len(res_data)))
+

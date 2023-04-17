@@ -10,6 +10,7 @@ import json
 from tqdm import tqdm
 from tools.train.train_utils import get_autocast, get_cast_dtype, AverageMeter
 from dataset.base_dataset import BaseDataset, build_dataloader
+from dataset.generation_dataset import MP3DGenerationDataset
 from tools.common_utils import all_gather
 from tools.parser import random_seed
 
@@ -476,8 +477,9 @@ def train_with_generate(args,batch_dict,tokenizer,logits,loss,answer_labels,gene
                 tokenizer.decode(pred_tokens, skip_special_tokens=False)
 
             ### input: prefix generate input sequence (only question, without answer)
-            batch_pred[sample_idx]['generate_answer_text'] = \
-                tokenizer.decode(generate_outputs[bs], skip_special_tokens=False)
+            if generate_outputs is not None:
+                batch_pred[sample_idx]['generate_answer_text'] = \
+                    tokenizer.decode(generate_outputs[bs], skip_special_tokens=False)
 
             question_text = input_question_text[bs][input_question_text[bs].find("Question"):].replace(
                 "Answer:", ""
@@ -680,3 +682,163 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb
 
     val_loss = loss_metric.average
     return val_loss,None
+
+
+def mp3d_text_generation(args, global_cfg, model, tokenizer, device_id, logger):
+    """
+    @param args:
+    @param global_cfg:
+    @param model:
+    @param tokenizer:
+    @param device_id: 0
+    @param logger: log message
+    """
+    logger.info("*************** generate language instruction from Matterport3D ***************")
+
+    # eval: if split == 'train', set training=True to keep the same train-dataset settings.
+    dataset = MP3DGenerationDataset(
+        config=global_cfg.Dataset,
+        split=args.generate_split,
+        training=False if args.generate_split != 'train' else True,
+        generate_start_index=args.generate_start_index
+    )
+    dataset, dataloader, sampler = build_dataloader(
+        dataset=dataset,
+        batch_size=args.batch_size,
+        dist=args.distributed,
+        workers=args.workers,
+        training=False if args.generate_split != 'train' else True,
+    )
+
+    # Keep the seed the same as it was during training: train_net.py
+    random_seed(args.seed, args.rank)
+
+    autocast = get_autocast(args.precision)
+    cast_dtype = get_cast_dtype(args.precision)
+
+    model.eval()
+    predictions = dict()
+    loss_metric = Metrics()
+    pred_num = 0
+
+    with torch.no_grad():
+        for idx, batch_dict in tqdm(
+                enumerate(dataloader),
+                total=dataloader.num_batches,
+                disable=args.rank != 0,
+                desc="validation {}:".format(args.generate_split)
+        ):
+            pred_num += 1
+            if pred_num > args.generate_nums:
+                break
+
+            #### FORWARD PASS ####
+            if batch_dict.get('imgs', None) is not None:
+                # (B, T_img=12, F, C, H, W) with F=1
+                #  Batch_size, T_img: num_media=12, F: num_frames
+                input_imgs = batch_dict['imgs'].to(device_id, dtype=cast_dtype, non_blocking=True)
+                use_local_vision = 'none'
+                input_imgs = input_imgs.unsqueeze(2)
+            elif batch_dict.get('img_feats', None) is not None:
+                input_imgs = batch_dict['img_feats'].to(device_id, dtype=cast_dtype, non_blocking=True)
+                use_local_vision = 'feature'
+            else:
+                raise NotImplementedError
+
+            #### TEXT GENERATION | ANSWER MASK ####
+            input_question_text = deepcopy(batch_dict['input_text'])
+            input_answer_text = deepcopy(batch_dict['input_text'])
+            for bs in range(len(input_question_text)):
+                st_idx = input_question_text[bs].find('Answer:')
+                input_question_text[bs] = input_question_text[bs][:st_idx] + "Answer:"
+                input_answer_text[bs] = input_answer_text[bs][st_idx:].replace("Answer:", "")
+
+            input_question_text = tokenizer(
+                input_question_text,
+                max_length=args.max_length,
+                padding="longest",
+                truncation=True,  # "only_first"?train
+                return_tensors="pt",
+            )
+            input_ids = input_question_text['input_ids'].to(device_id, dtype=cast_dtype, non_blocking=True)
+            attention_mask = input_question_text['attention_mask'].to(
+                device_id, dtype=cast_dtype, non_blocking=True
+            )
+
+            ############### greedy inference | text generation ###############
+            # Greedy Inference
+            generate_outputs = model(
+                vision_x=input_imgs,
+                lang_x=input_ids,
+                attention_mask=attention_mask,
+                mode='generate',
+                max_length=global_cfg.Inference.max_new_tokens,
+            )
+
+            # Single-GPU Inference
+            # [1] global_cfg.Inference.num_beams=1 greedy generation
+            # outputs = model.generate(
+            #     input_imgs.to(device_id if device_id >= 0 else "cpu"),
+            #     input_ids.to(device_id if device_id >= 0 else "cpu"),
+            #     attention_mask=attention_mask.to(device_id if device_id >= 0 else "cpu"),
+            #     max_new_tokens=global_cfg.Inference.max_new_tokens,
+            #     num_beams=global_cfg.Inference.num_beams,
+            #     length_penalty=global_cfg.Inference.length_penalty,
+            # )
+
+            generate_outputs = generate_outputs[:, len(input_ids[0]):]
+
+            ############## VALIDATION LOSS ##############
+            input_text = tokenizer(
+                batch_dict['input_text'],
+                max_length=args.max_length,
+                padding="longest",
+                truncation="only_first", # True,  # "only_first"?train
+                return_tensors="pt",
+            )
+            input_ids = input_text['input_ids'].to(device_id, dtype=cast_dtype, non_blocking=True)
+            attention_mask = input_text['attention_mask'].to(
+                device_id, dtype=cast_dtype, non_blocking=True
+            )
+            labels = input_ids.clone()
+            labels[labels == tokenizer.pad_token_id] = -100
+            labels[:, 0] = -100
+            labels[labels == args.media_token_id] = -100
+
+            # question->answer:
+            answer_labels = labels.clone()
+            for bs in range(labels.shape[0]):
+                # LLaMa: tokenizer.decode([0,1,2,32000,32001,32002])
+                #   >>> '<unk><s></s><|endofchunk|><image><PAD>'
+                # st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
+                ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
+                ed_idx += 2  # "?Answer:"
+                answer_labels[bs, :ed_idx] = -100
+
+            # labels.to(device_id)
+            answer_labels.to(device_id)
+            ####### Forward, Compute Loss #######
+            with autocast():
+                output = model(
+                    vision_x=input_imgs,
+                    lang_x=input_ids,
+                    attention_mask=attention_mask,
+                    labels=answer_labels,
+                    use_local_vision=use_local_vision,
+                )
+                loss = output[0]
+                logits = output[1]
+            loss_metric.accumulate(loss.data.item())
+
+            ####### Loss -> Text Generation #######
+            batch_pred = train_with_generate(
+                args, batch_dict, tokenizer, logits, loss, answer_labels, generate_outputs
+            )
+            all_batch_pred = all_gather(batch_pred)
+            if args.rank == 0:
+                for per_pred in all_batch_pred:
+                    predictions.update(per_pred)
+
+    val_loss = loss_metric.average
+    predictions['val_mean_loss'] = val_loss
+    return val_loss,predictions

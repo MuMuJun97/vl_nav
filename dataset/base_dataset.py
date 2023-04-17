@@ -2,7 +2,11 @@ import pickle
 import random
 from collections import defaultdict
 import numpy as np
-from .preprocess_data import preprocess_soon_v1,preprocess_fr2r,promptQAs
+from .preprocess_data import (
+    preprocess_soon_v1,preprocess_fr2r,
+    promptQAs,
+    generate_direction_from_mp3d
+)
 from tools.train import common_utils
 from PIL import Image
 import torch
@@ -87,6 +91,11 @@ class BaseDataset(torch_data.Dataset):
         else:
             self.generate_start_index = None
 
+        if kwargs.get('save_img',None) is not None:
+            self.save_img = kwargs['save_img']
+        else:
+            self.save_img = None
+
         print('Dataset Initialize')
 
     def __len__(self):
@@ -122,7 +131,7 @@ class BaseDataset(torch_data.Dataset):
         assert img_file.exists()
         img = cv2.imread(str(img_file)) # BRG
 
-        if self.generate_start_index is not None:
+        if self.save_img is not None:
             save_dir = self.img_dir.parent / 'samples'
             save_dir.mkdir(parents=True, exist_ok=True)
             save_file = save_dir / "{}_{}_{}.png".format(index,scan,viewpoint)
