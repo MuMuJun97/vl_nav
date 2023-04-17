@@ -22,8 +22,44 @@ class MP3DGenerationDataset(BaseDataset):
             config=config,split=split,training=training,logger=logger,in_memory=in_memory,**kwargs
         )
 
-        generate_direction_from_mp3d(self.navigable_loc)
+        self.data = generate_direction_from_mp3d(self.navigable_loc)
 
+    def __len__(self):
+        return len(self.data)
 
+    def get_data_dict(self, item, scan, index):
+        viewpoint = item['viewpoint']
+        view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
+        question = item['qa']['question_view2instr']
+        input_text = self.generate_input_text(
+            question=question,
+            answer='Answer:',
+        )
+        if self.img_dir is not None:
+            data_dict = {
+                'input_text': input_text,
+                'imgs': view_fts,
+            }
+        else:
+            data_dict = {
+                'input_text': input_text,
+                'img_feats': view_fts[:, :self.config.image_feat_size],
+                'obj_feats': obj_img_fts[:, :self.config.obj_feat_size] if self.obj_ft_file is not None else None,
+            }
+            if data_dict.get('obj_feats', None) is None:
+                data_dict.pop('obj_feats')
+        return data_dict
+
+    def __getitem__(self, index):
+        if self.generate_start_index is not None:
+            index += self.generate_start_index
+
+        item = self.data[index]
+        scan = item['scan']
+
+        data_dict = self.get_data_dict(item,scan,index)
+        data_dict['sample_idx'] = index
+
+        return data_dict
 
 

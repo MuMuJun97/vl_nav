@@ -204,5 +204,7 @@ def main():
         print("[ERROR] Please use \"eval_net.py\" for evaluation")
         exit()
 
+    logger.info("************************ END ************************")
+
 if __name__ == "__main__":
     main()

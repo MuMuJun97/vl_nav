@@ -106,7 +106,7 @@ def main():
 
     logger.info("**************************** text generate ****************************")
 
-    val_loss,predictions = mp3d_text_generation(
+    predictions = mp3d_text_generation(
         args=args,
         global_cfg=global_cfg,
         model=ddp_model,
@@ -123,7 +123,7 @@ def main():
             ))
         with open(str(val_pred_file), 'w') as f:
             json.dump(predictions, f, indent=2)
-    logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
+    logger.info("********** END **********")
 
 
 if __name__ == "__main__":

@@ -485,4 +485,5 @@ def generate_direction_from_mp3d(navigable_loc, mode="all"):
                     res_data.append(item)
                     item_idx += 1
     print('[INFO] select {} samples from mp3d'.format(len(res_data)))
+    return res_data
 

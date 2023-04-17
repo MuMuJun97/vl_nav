@@ -33,6 +33,8 @@ class BaseDataset(torch_data.Dataset):
         # read Matterport3D navigableLocations
         self.navigable_loc = self.get_navigable_Locations()
 
+        # generate_direction_from_mp3d(self.navigable_loc)
+
         self.source_data = config.SOURCE
         print('[INFO] ********* use dataset : {} *********'.format(self.source_data))
         self.data = []

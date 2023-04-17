@@ -622,7 +622,7 @@ def train_one_epoch(
                     cur_lr = optimizer.param_groups[0]['lr']
 
                 tb_log.add_scalar('meta_data/learning_rate',cur_lr,global_step)
-                tb_log.add_scalar('train/loss', loss_metric.average, global_step)
+                tb_log.add_scalar('train/loss', loss.data.item(), global_step)
 
         # Log loss to console
         if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
@@ -718,7 +718,6 @@ def mp3d_text_generation(args, global_cfg, model, tokenizer, device_id, logger):
 
     model.eval()
     predictions = dict()
-    loss_metric = Metrics()
     pred_num = 0
 
     with torch.no_grad():
@@ -775,70 +774,32 @@ def mp3d_text_generation(args, global_cfg, model, tokenizer, device_id, logger):
                 max_length=global_cfg.Inference.max_new_tokens,
             )
 
-            # Single-GPU Inference
-            # [1] global_cfg.Inference.num_beams=1 greedy generation
-            # outputs = model.generate(
-            #     input_imgs.to(device_id if device_id >= 0 else "cpu"),
-            #     input_ids.to(device_id if device_id >= 0 else "cpu"),
-            #     attention_mask=attention_mask.to(device_id if device_id >= 0 else "cpu"),
-            #     max_new_tokens=global_cfg.Inference.max_new_tokens,
-            #     num_beams=global_cfg.Inference.num_beams,
-            #     length_penalty=global_cfg.Inference.length_penalty,
-            # )
-
             generate_outputs = generate_outputs[:, len(input_ids[0]):]
 
-            ############## VALIDATION LOSS ##############
-            input_text = tokenizer(
-                batch_dict['input_text'],
-                max_length=args.max_length,
-                padding="longest",
-                truncation="only_first", # True,  # "only_first"?train
-                return_tensors="pt",
-            )
-            input_ids = input_text['input_ids'].to(device_id, dtype=cast_dtype, non_blocking=True)
-            attention_mask = input_text['attention_mask'].to(
-                device_id, dtype=cast_dtype, non_blocking=True
-            )
-            labels = input_ids.clone()
-            labels[labels == tokenizer.pad_token_id] = -100
-            labels[:, 0] = -100
-            labels[labels == args.media_token_id] = -100
+            batch_pred = dict()
+            input_question_text = deepcopy(batch_dict['input_text'])
+            input_answer_text = deepcopy(batch_dict['input_text'])
+            for bs in range(len(input_question_text)):
+                st_idx = input_question_text[bs].find('Answer:')
+                input_question_text[bs] = input_question_text[bs][:st_idx] + "Answer:"
+                input_answer_text[bs] = input_answer_text[bs][st_idx:].replace("Answer:", "")
 
-            # question->answer:
-            answer_labels = labels.clone()
-            for bs in range(labels.shape[0]):
-                # LLaMa: tokenizer.decode([0,1,2,32000,32001,32002])
-                #   >>> '<unk><s></s><|endofchunk|><image><PAD>'
-                # st_idx = (answer_labels[bs] == args.question_token_id).nonzero(as_tuple=True)[0]
-                ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
-                ed_idx += 2  # "?Answer:"
-                answer_labels[bs, :ed_idx] = -100
+                sample_idx = batch_dict['sample_idx'][bs]
+                batch_pred[sample_idx] = dict()
+                batch_pred[sample_idx]['_gt_full_text'] = batch_dict['input_text'][bs]
 
-            # labels.to(device_id)
-            answer_labels.to(device_id)
-            ####### Forward, Compute Loss #######
-            with autocast():
-                output = model(
-                    vision_x=input_imgs,
-                    lang_x=input_ids,
-                    attention_mask=attention_mask,
-                    labels=answer_labels,
-                    use_local_vision=use_local_vision,
+                ### input: prefix generate input sequence (only question, without answer)
+                batch_pred[sample_idx]['generate_answer_text'] = \
+                    tokenizer.decode(generate_outputs[bs], skip_special_tokens=False)
+
+                question_text = input_question_text[bs][input_question_text[bs].find("Question"):].replace(
+                    "Answer:", ""
                 )
-                loss = output[0]
-                logits = output[1]
-            loss_metric.accumulate(loss.data.item())
+                batch_pred[sample_idx]['_gt_question_text'] = question_text
 
-            ####### Loss -> Text Generation #######
-            batch_pred = train_with_generate(
-                args, batch_dict, tokenizer, logits, loss, answer_labels, generate_outputs
-            )
             all_batch_pred = all_gather(batch_pred)
             if args.rank == 0:
                 for per_pred in all_batch_pred:
                     predictions.update(per_pred)
 
-    val_loss = loss_metric.average
-    predictions['val_mean_loss'] = val_loss
-    return val_loss,predictions
+    return predictions
