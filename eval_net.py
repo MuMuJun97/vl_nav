@@ -105,7 +105,7 @@ def main():
 
     logger.info("**************************** text generate ****************************")
 
-    val_loss,predictions = text_generate(
+    val_loss, predictions = text_generate(
         args=args,
         global_cfg=global_cfg,
         model=ddp_model,

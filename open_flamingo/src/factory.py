@@ -73,6 +73,7 @@ def create_model_and_transforms(
     else:
         unfreeze_llm = False
 
+    lang_encoder = lang_encoder.bfloat16()
     # TODO ? endofchunk: how to modify?
     # cross_attn_every_n_layers: multi-modal cross fusion layer.
     model = Flamingo(
@@ -90,11 +91,14 @@ def create_model_and_transforms(
 
     # Freeze all parameters
     model.requires_grad_(False)
-    assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
+    # assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
 
-    # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
-    model.perceiver.requires_grad_(True)
-    model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
+    # # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
+    # model.perceiver.requires_grad_(True)
+    model.mapper.requires_grad_(True)
+    model.lang_encoder.requires_grad_(True)
+
+    # model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
     model.lang_encoder.get_input_embeddings().requires_grad_(True)
 
     print(

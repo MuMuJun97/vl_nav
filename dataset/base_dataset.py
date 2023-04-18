@@ -122,11 +122,11 @@ class BaseDataset(torch_data.Dataset):
         assert img_file.exists()
         img = cv2.imread(str(img_file)) # BRG
 
-        if self.generate_start_index is not None:
-            save_dir = self.img_dir.parent / 'samples'
-            save_dir.mkdir(parents=True, exist_ok=True)
-            save_file = save_dir / "{}_{}_{}.png".format(index,scan,viewpoint)
-            cv2.imwrite(str(save_file),img)
+        # if self.generate_start_index is not None:
+        #     save_dir = self.img_dir.parent / 'samples'
+        #     save_dir.mkdir(parents=True, exist_ok=True)
+        #     save_file = save_dir / "{}_{}_{}.png".format(index,scan,viewpoint)
+        #     cv2.imwrite(str(save_file),img)
 
         imgs = np.hsplit(img,12)
 
@@ -210,7 +210,7 @@ class BaseDataset(torch_data.Dataset):
 
         # environment = "".join(["<image>" if i==1 else "<image>" for i in view_mask])
         use_image_id = self.prompt.image_id
-        environment = "".join(["<image>-direction {};".format(i) if use_image_id else "<image>" for i in range(12)])
+        environment = "".join(["{}. <image> ".format(i) if use_image_id else "<image>" for i in range(12)])
         environment = environment + "."
         question = " ".join(question.split())
         answer = " ".join(answer.split())

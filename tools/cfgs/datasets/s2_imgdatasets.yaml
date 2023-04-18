@@ -64,7 +64,7 @@ Dataset:
 
   vision_encoder:
     image_size: [224,224]
-    path: "ViT-L-14"
+    path: "ViT-B-16"
     pretrained: "openai"
 
 Inference:

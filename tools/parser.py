@@ -37,7 +37,7 @@ def read_args():
 
     ############# EVAL #############
     parser.add_argument('--text_generate', default=False, action="store_true", help='text generate')
-    parser.add_argument('--generate_split', type=str, default="train", help='train,val_unseen,')
+    parser.add_argument('--generate_split', type=str, default="val_seen", help='train,val_unseen,')
     parser.add_argument('--generate_start_index', type=int, default=0, help='start index')
     parser.add_argument('--generate_nums', type=int, default=40, help='text generate nums')
 
@@ -95,7 +95,7 @@ def read_args():
     parser.add_argument(
         "--precision",
         choices=["amp_bf16", "amp_bfloat16", "bf16", "fp16", "fp32"],
-        default="fp32",
+        default="amp_bf16",
         help="Floating point precision.",
     )
     # data args

@@ -522,7 +522,7 @@ def train_one_epoch(
             ed_idx = (answer_labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
             ed_idx += 2  # "?Answer:"
             answer_labels[bs,:ed_idx] = -100
-
+            
         # labels.to(device_id)
         answer_labels.to(device_id)
 
@@ -541,16 +541,17 @@ def train_one_epoch(
 
         #### MASK GRADIENTS FOR EMBEDDINGS ####
         # Note (anas): Do not apply weight decay to embeddings as it will break this function.
-        def mask_embedding(m):
-            if isinstance(m, torch.nn.Embedding) and m.weight.requires_grad:
-                zero_mask = torch.zeros_like(m.weight.grad)
-                zero_mask[args.media_token_id] = torch.ones_like(zero_mask[args.media_token_id])
-                zero_mask[args.endofchunk_token_id] = torch.ones_like(
-                    zero_mask[args.endofchunk_token_id]
-                )
-                m.weight.grad = m.weight.grad * zero_mask
+        # def mask_embedding(m):
+        #     if isinstance(m, torch.nn.Embedding) and m.weight.requires_grad:
+        #         import pdb;pdb.set_trace()
+        #         zero_mask = torch.zeros_like(m.weight.grad)
+        #         zero_mask[args.media_token_id] = torch.ones_like(zero_mask[args.media_token_id])
+        #         zero_mask[args.endofchunk_token_id] = torch.ones_like(
+        #             zero_mask[args.endofchunk_token_id]
+        #         )
+        #         m.weight.grad = m.weight.grad * zero_mask
 
-        model.apply(mask_embedding)
+        # model.apply(mask_embedding)
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 

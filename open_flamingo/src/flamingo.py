@@ -34,10 +34,12 @@ class Flamingo(nn.Module):
         self.use_media_placement_augmentation = use_media_placement_augmentation
         self.vis_dim = vis_dim
         self.vision_encoder = vision_encoder
-        self.perceiver = PerceiverResampler(dim=self.vis_dim)
+        # self.perceiver = PerceiverResampler(dim=self.vis_dim)
+        self.mapper = nn.Sequential(
+            nn.Linear(768, 4096),
+            nn.LayerNorm(4096)
+        )
 
-        # TODO
-        # self.multi_view_fusion =
 
         self.lang_encoder = lang_encoder
         self.lang_encoder.init_flamingo(
@@ -256,8 +258,9 @@ class Flamingo(nn.Module):
         vision_x = rearrange(vision_x, "(b M) t v d -> b M t v d", b=b, M=M) # (b, 12, 1, 64, 1024)
         avg_pano_vision_x = torch.mean(vision_x,dim=1)
 
-        for layer in self.lang_encoder._get_decoder_layers():
-            layer.condition_vis_x(avg_pano_vision_x)
+        self.lang_encoder.condition_vis_x(avg_pano_vision_x)
+        # for layer in self.lang_encoder._get_decoder_layers():
+        #     layer.condition_vis_x(avg_pano_vision_x)
 
         # all_vision_feats = []
         # for m in range(M):
@@ -292,10 +295,12 @@ class Flamingo(nn.Module):
             vision_x = self.vision_encoder.visual(vision_x)[1]
         vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
 
-        vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
+        # vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
+        vision_x = self.mapper(vision_x.mean(dim=-2))
 
-        for layer in self.lang_encoder._get_decoder_layers():
-            layer.condition_vis_x(vision_x)
+        self.lang_encoder.condition_vis_x(vision_x)
+        # for layer in self.lang_encoder._get_decoder_layers():
+        #     layer.condition_vis_x(vision_x)
 
     def prepare_inputs_for_generation(
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
@@ -382,7 +387,6 @@ class Flamingo(nn.Module):
         while True:
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
-
             # forward pass to get next token
             outputs = self.lang_encoder(
                 **model_inputs,
