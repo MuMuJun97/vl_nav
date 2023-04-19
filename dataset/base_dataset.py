@@ -262,29 +262,13 @@ class BaseDataset(torch_data.Dataset):
         ### [1] Fine-grained R2R Dataset
         if index >= len(self.soon_data):
 
-            vp_index = 0 # start viewpoint
-
-            if self.training:
-                vp_index = random.randint(0,len(item['path'])-1)
+            question = item['qa']['question']
+            answer = item['qa']['answer']
 
             # for fine-grained dataset: sub-path <-> sub-instruction
-            viewpoint = item['path'][vp_index]
+            viewpoint = item['viewpoint']
             view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
-            ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
-
-            if ViewpointNext == -1:
-                # [1] next step is STOP
-                question = item['qa']['question_instr2view'] # instr->next step
-                answer = 'Answer:stop'
-            else:
-                if index % 2 == 0:
-                    question = item['qa']['question_instr2view']  # [2] instr->next step
-                    answer = item['qa']['answer_instr2view']
-                    answer = answer.format(ViewID=ViewpointNext)
-                else:
-                    question = item['qa']['question_view2instr']  # [3] give view->instruction
-                    question = question.format(ViewID=ViewpointNext)
-                    answer = item['qa']['answer_view2instr']
+            # ViewpointNext = item['ViewpointNext']  # next direction {0..11}, -1 means STOP
 
         ### [2] SOON Dataset
         else:

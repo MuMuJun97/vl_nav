@@ -1,3 +1,4 @@
+import copy
 import json
 from tqdm import tqdm
 import random
@@ -51,11 +52,13 @@ promptQAs = {
         'view2instr':{
             'question': "how to get to direction {ViewID}?",
             'answer'  : "{Instruction}",
+            'stop_question': "how to stop?",
         },
         'stop':{
             'question': "what is the next action for the navigation instruction \"{Instruction}\"?",
             'answer'  : "stop",
         },
+
     },
     # 'R2R': [
     #     "which direction does the navigation instruction \"{Instruction}\" refer to?", # 0: instr2view
@@ -313,15 +316,24 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
     pbar = tqdm(fr2r_data, desc="preprocess fine-grained data:")
 
     stop_cases = []
+    stop_sum = 0
     filter_cases_path = 0
     filter_cases_instr = 0
+
+    answers_type = {
+        'stop':0,
+        'all':0
+    }
+    for i in range(12):
+        answers_type[i] = 0
+
+    enable_instr2view = True
+    enable_view2instr = True
 
     for idx, _ in enumerate(pbar):
         for j,chunk in enumerate(fr2r_data[idx]['chunk_view']):
             for k,sub_path in enumerate(chunk):
                 item = dict()
-                item['sample_idx'] = item_idx
-
                 item['scan'] = fr2r_data[idx]['scan']
                 item['fr2r'] = {
                     'distance': fr2r_data[idx]['distance'],
@@ -365,6 +377,13 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                 # TODO: set next direction ID to current viewpoint
                 item['navigable_pathViewIds'] = navigable_pathViewIds[start_index:end_index]
 
+                if len(item['navigable_pathViewIds']) < 1:
+                    continue
+
+                # # remove cases: only STOP action
+                # if item['navigable_pathViewIds'][-1] == -1 and len(item['navigable_pathViewIds']) < 2:
+                #     continue
+
                 item['qa'] = {
                     'full_instr': fr2r_data[idx]['instructions'][j],
                     'sub_instr': " ".join(cur_sub_instr)
@@ -372,42 +391,111 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
 
                 if 'stop' in item['qa']['sub_instr']:
                     stop_cases.append(item['qa']['sub_instr'])
+                stop_sum += 1
 
-                # qa type 1: give instruction, ask direction ViewID
-                question_instr2view = "Question:{}".format(
-                    promptQAs['R2R']['instr2view']['question']
-                )
-                question_instr2view = question_instr2view.format(
-                    Instruction=item['qa']['sub_instr']
-                )
-                answer_instr2view = "Answer:{}".format(promptQAs['R2R']['instr2view']['answer'])
+                item_instr2view = copy.deepcopy(item)
+                item_view2instr = copy.deepcopy(item)
 
-                # qa type 2: give ViewID, ask instruction
-                question_view2instr = "Question:{}".format(
-                    promptQAs['R2R']['view2instr']['question']
-                )
-                answer_view2instr = "Answer:{}".format(promptQAs['R2R']['view2instr']['answer'])
-                answer_view2instr = answer_view2instr.format(
-                    Instruction=item['qa']['sub_instr']
-                )
+                ###### [1] qa type: give instruction, ask direction ViewID ######
+                # "which direction does the navigation instruction \"{Instruction}\" refer to?"
+                if enable_instr2view:
+                    question_instr2view = "Question:{}".format(
+                        promptQAs['R2R']['instr2view']['question']
+                    )
+                    question_instr2view = question_instr2view.format(
+                        Instruction=item['qa']['sub_instr']
+                    )
 
-                # qa type 3: give instruction, ask next action: STOP
-                question_stop = "Question:{}".format(
-                    promptQAs['R2R']['stop']['question']
-                )
-                question_stop = question_stop.format(
-                    Instruction=item['qa']['sub_instr']
-                )
-                answer_stop = "Answer:{}".format(promptQAs['R2R']['stop']['answer'])
+                    # query next step:
+                    if item['navigable_pathViewIds'][-1] == -1: # next step: STOP
+                        prob = random.random()
+                        if prob < 0.2:
+                            vp_index = random.randint(0, len(item['path']) - 1)
+                        elif len(item['path']) == 1:
+                            vp_index = random.randint(0, len(item['path']) - 1)
+                        elif len(item['path']) > 1:
+                            # not consider STOP.
+                            vp_index = random.randint(0, len(item['path']) - 2)
+                    else:
+                        vp_index = random.randint(0, len(item['path']) - 1)
+                    ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
 
-                item['qa']['question_instr2view'] = question_instr2view
-                item['qa']['answer_instr2view'] = answer_instr2view
-                item['qa']['question_view2instr'] = question_view2instr
-                item['qa']['answer_view2instr'] = answer_view2instr
-                item['qa']['question_stop'] = question_stop
-                item['qa']['answer_stop'] = answer_stop
+                    if ViewpointNext == -1:
+                        answers_type['stop'] += 1
+                        answer_instr2view = "Answer:{}".format(promptQAs['R2R']['instr2view']['answer'])
+                        answer_instr2view = answer_instr2view.format(ViewID='stop')
+                    else:
+                        answers_type[ViewpointNext] += 1
+                        answer_instr2view = "Answer:{}".format(promptQAs['R2R']['instr2view']['answer'])
+                        answer_instr2view = answer_instr2view.format(ViewID=ViewpointNext)
+                    answers_type['all'] += 1
 
-                res_data.append(item)
+                    viewpoint = item['path'][vp_index]
+
+                    item_instr2view['qa']['question'] = question_instr2view
+                    item_instr2view['qa']['answer'] = answer_instr2view
+                    item_instr2view['viewpoint'] = viewpoint
+                    item_instr2view['ViewpointNext'] = ViewpointNext
+
+                ###### [2] qa type: give ViewID, ask instruction ######
+                # "how to get to direction {ViewID}?"
+                if enable_view2instr:
+                    # query next step:
+                    if item['navigable_pathViewIds'][-1] == -1: # next step: STOP
+                        prob = random.random()
+                        if prob < 0.2:
+                            vp_index = random.randint(0, len(item['path']) - 1)
+                        elif len(item['path']) == 1:
+                            vp_index = random.randint(0, len(item['path']) - 1)
+                        elif len(item['path']) > 1:
+                            # not consider STOP.
+                            vp_index = random.randint(0, len(item['path']) - 2)
+                    else:
+                        vp_index = random.randint(0, len(item['path']) - 1)
+                    ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
+
+                    if ViewpointNext == -1:
+                        question_view2instr = "Question:{}".format(
+                            promptQAs['R2R']['view2instr']['stop_question']
+                        )
+                    else:
+                        question_view2instr = "Question:{}".format(
+                            promptQAs['R2R']['view2instr']['question']
+                        )
+                        question_view2instr = question_view2instr.format(ViewID=ViewpointNext)
+                    answer_view2instr = "Answer:{}".format(promptQAs['R2R']['view2instr']['answer'])
+                    answer_view2instr = answer_view2instr.format(
+                        Instruction=item['qa']['sub_instr']
+                    )
+
+                    viewpoint = item['path'][vp_index]
+
+                    item_view2instr['qa']['question'] = question_view2instr
+                    item_view2instr['qa']['answer'] = answer_view2instr
+                    item_view2instr['viewpoint'] = viewpoint
+                    item_view2instr['ViewpointNext'] = ViewpointNext
+
+                # # qa type 3: give instruction, ask next action: STOP
+                # question_stop = "Question:{}".format(
+                #     promptQAs['R2R']['stop']['question']
+                # )
+                # question_stop = question_stop.format(
+                #     Instruction=item['qa']['sub_instr']
+                # )
+                # answer_stop = "Answer:{}".format(promptQAs['R2R']['stop']['answer'])
+                #
+                # item['qa']['question_instr2view'] = question_instr2view
+                # item['qa']['answer_instr2view'] = answer_instr2view
+                # item['qa']['question_view2instr'] = question_view2instr
+                # item['qa']['answer_view2instr'] = answer_view2instr
+                # item['qa']['question_stop'] = question_stop
+                # item['qa']['answer_stop'] = answer_stop
+
+                item_instr2view['sample_idx'] = item_idx
+                res_data.append(item_instr2view)
+                item_idx += 1
+                item_view2instr['sample_idx'] = item_idx
+                res_data.append(item_view2instr)
                 item_idx += 1
 
     # # TEST Visualization Paths
@@ -415,12 +503,29 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
     # for item_s in res_data[:100]:
     #     mp3d_view(item_s)
 
-    print('[INFO] collecting Fine-grained dataset {} samples'.format(len(res_data)))
+    ans_msg = "[INFO] answers type frequency: \n "
+    for ans,ans_nums in answers_type.items():
+        if ans == 'all':
+            continue
+        if ans == 'stop':
+            ans_msg += "[{}]: {:.2f}% ({}/{}) .".format(
+                ans, (answers_type[ans] * 100 / answers_type['all']), answers_type[ans], answers_type['all']
+            )
+        elif int(ans) % 3 == 0:
+            ans_msg += "[{}]: {:.2f}% ({}/{}) .\n ".format(
+                ans,(answers_type[ans]*100/answers_type['all']),answers_type[ans],answers_type['all']
+            )
+        else:
+            ans_msg += "[{}]: {:.2f}% ({}/{}) .".format(
+                ans, (answers_type[ans] * 100 / answers_type['all']), answers_type[ans], answers_type['all']
+            )
+    print(ans_msg)
+    print('[INFO] collecting Fine-grained dataset {} = 2 x {} samples'.format(len(res_data),stop_sum))
     print('[INFO] filter and remove: (1) short sub-path {} samples; (2) short sub-instruct {} samples'.format(
         filter_cases_path, filter_cases_instr
     ))
     print('[INFO] there are {:.2f}% ({}/{}) STOP samples in Fine-grained R2R dataset'.format(
-        (len(stop_cases)/len(res_data)),len(stop_cases),len(res_data)
+        (len(stop_cases)/stop_sum),len(stop_cases),stop_sum
     ))
     return res_data
 

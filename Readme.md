@@ -1,5 +1,32 @@
 # Matterport3D Navigation Dataset
 
+## Instruction Generation on Matterport3D
+- script: use checkpoint_10.pt to generate instructions.
+```shell
+torchrun --nnodes=1 --nproc_per_node=8 generate_net.py --cfg_file tools/cfgs/datasets/s2_imgdatasets.yaml --vision_encoder_path "ViT-L-14" --tokenizer_path /mnt/lustre/zhaolin/vln/llm/models --cross_attn_every_n_layers 8 --run_name Train3 --train_with_generate True --workers 4 --generate_nums 20000 --resume_from_checkpoint /mnt/lustre/zhaolin/vln/nav/vl_nav_output/Train3/checkpoint_10.pt --generate_split val_unseen
+```
+- question template:
+```shell
+    "_gt_full_text": "Please help me navigate inside the building. 
+    I will provide 12 images of the environment from different direction angles.
+    Environment:<image>-direction 0;<image>-direction 1;<image>-direction 2;<image>-direction 3;<image>-direction 4;
+    <image>-direction 5;<image>-direction 6;<image>-direction 7;<image>-direction 8;<image>-direction 9;
+    <image>-direction 10;<image>-direction 11;.
+    Question:how to get to direction 0?Answer:<|endofchunk|></s>",
+    "generate_answer_text": "walk through the doorway straight ahead<|endofchunk|>",
+    "_gt_question_text": "Question:how to get to direction 0?"
+```
+- generate data:
+```shell
+build/data/mp3d_12view_instructions_checkpoint_10.json
+```
+- visualize image and instructions
+```shell
+
+```
+
+
+
 ## Dataset
 ### 1. select dataset: [SOON](https://scenario-oriented-object-navigation.github.io/), [Fine-grained R2R](https://github.com/YicongHong/Fine-Grained-R2R), [REVIERE(TODO)](https://yuankaiqi.github.io/REVERIE_Challenge/dataset.html)
 ```shell
