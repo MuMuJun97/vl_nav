@@ -170,6 +170,11 @@ def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
     loss_metric = Metrics()
     pred_num = 0
 
+    view_preds = {i:0 for i in range(12)}
+    view_preds.update({"sum_{}".format(i): 0 for i in range(12)})
+    view_preds.update({'stop':0, 'sum_stop':0})
+    all_view_preds = deepcopy(view_preds)
+
     with torch.no_grad():
         for idx, batch_dict in tqdm(
                 enumerate(dataloader),
@@ -288,6 +293,46 @@ def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
                 for per_pred in all_batch_pred:
                     predictions.update(per_pred)
 
+            ########## Compute Acc ##########
+            for bs in range(input_ids.shape[0]):
+                instr2view_id = batch_dict['instr2view_id'][bs]
+                if instr2view_id == '':
+                    continue
+                ed_idx = (labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
+                ed_idx += 2  # "?Answer:"
+                gt_id = labels[bs, ed_idx]
+                pred_id = logits[bs, ed_idx - 1]
+                if instr2view_id == 'stop':
+                    view_preds['sum_stop'] += 1
+                    if gt_id == pred_id:
+                        view_preds['stop'] += 1
+                else:
+                    view_preds['sum_{}'.format(instr2view_id)] += 1
+                    if gt_id == pred_id:
+                        view_preds[int(instr2view_id)] += 1
+
+        ########## Compute Acc ##########
+        tmp_predictions = all_gather(view_preds)
+        for per_pred in tmp_predictions:
+            for k, v in per_pred:
+                all_view_preds[k] += v
+        pred_acc = 'Acc:\n'
+        all_pred = all_sum = 0
+        for pi in range(12):
+            all_pred += all_view_preds[pi]
+            all_sum += all_view_preds['sum_{}'.format(pi)]
+            pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
+                pi, (all_view_preds[pi] * 100 / all_view_preds['sum_{}'.format(pi)]),
+                all_view_preds[pi], all_view_preds['sum_{}'.format(pi)])
+        pi = 'stop'
+        all_pred += all_view_preds[pi]
+        all_sum += all_view_preds['sum_{}'.format(pi)]
+        pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
+            pi, (all_view_preds[pi] * 100 / all_view_preds['sum_{}'.format(pi)]),
+            all_view_preds[pi], all_view_preds['sum_{}'.format(pi)])
+        pred_acc += "mean acc: {:.2f}% ({}/{})\n".format(100 * (all_pred / all_sum), all_pred, all_sum)
+        logger.info(pred_acc)
+
     val_loss = loss_metric.average
     predictions['val_mean_loss'] = val_loss
     return val_loss,predictions
@@ -362,7 +407,8 @@ def forward_with_loss(
         batch_dict,
         tokenizer,
         device_id,
-        cast_dtype
+        cast_dtype,
+        predictions
 ):
     #### FORWARD PASS ####
     if batch_dict.get('imgs', None) is not None:
@@ -406,13 +452,33 @@ def forward_with_loss(
     # labels.to(device_id)
     answer_labels.to(device_id)
 
-    loss = model(
+    outputs = model(
         vision_x=input_imgs,
         lang_x=input_ids,
         attention_mask=attention_mask,
         labels=answer_labels,
         use_local_vision=use_local_vision,
-    )[0]
+    )
+    loss = outputs[0]
+    logits = torch.argmax(outputs[1],dim=-1)
+
+    ########### Compute Acc ###########
+    for bs in range(input_ids.shape[0]):
+        instr2view_id = batch_dict['instr2view_id'][bs]
+        if instr2view_id == '':
+            continue
+        ed_idx = (labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
+        ed_idx += 2  # "?Answer:"
+        gt_id = labels[bs, ed_idx]
+        pred_id = logits[bs, ed_idx-1]
+        if instr2view_id == 'stop':
+            predictions['sum_stop'] += 1
+            if gt_id == pred_id:
+                predictions['stop'] += 1
+        else:
+            predictions['sum_{}'.format(instr2view_id)] += 1
+            if gt_id == pred_id:
+                predictions[int(instr2view_id)] += 1
 
     return loss
 
@@ -650,8 +716,10 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb
     cast_dtype = get_cast_dtype(args.precision)
 
     loss_metric = Metrics()
-    predictions = dict()
-
+    predictions = {i:0 for i in range(12)}
+    predictions.update({"sum_{}".format(i): 0 for i in range(12)})
+    predictions.update({'stop':0, 'sum_stop':0})
+    all_predictions = deepcopy(predictions)
     with torch.no_grad():
         for idx, batch_dict in tqdm(
                 enumerate(data_loader),
@@ -665,7 +733,8 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb
                 batch_dict=batch_dict,
                 tokenizer=tokenizer,
                 device_id=device_id,
-                cast_dtype=cast_dtype
+                cast_dtype=cast_dtype,
+                predictions=predictions,
             )
             loss_metric.accumulate(loss.data.item())
 
@@ -679,6 +748,29 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb
             #     cast_dtype=cast_dtype
             # )
             # predictions.update(cur_preds)
+
+    ########### eval acc ###########
+    tmp_predictions = all_gather(predictions)
+    for per_pred in tmp_predictions:
+        for k,v in per_pred:
+            all_predictions[k] += v
+
+    pred_acc = 'Acc:\n'
+    all_pred = all_sum = 0
+    for pi in range(12):
+        all_pred += all_predictions[pi]
+        all_sum += all_predictions['sum_{}'.format(pi)]
+        pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
+            pi,(all_predictions[pi]*100/all_predictions['sum_{}'.format(pi)]),
+            all_predictions[pi],all_predictions['sum_{}'.format(pi)])
+    pi = 'stop'
+    all_pred += all_predictions[pi]
+    all_sum += all_predictions['sum_{}'.format(pi)]
+    pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
+            pi,(all_predictions[pi]*100/all_predictions['sum_{}'.format(pi)]),
+            all_predictions[pi],all_predictions['sum_{}'.format(pi)])
+    pred_acc += "mean acc: {:.2f}% ({}/{})\n".format(100*(all_pred/all_sum),all_pred,all_sum)
+    logger.info(pred_acc)
 
     val_loss = loss_metric.average
     return val_loss,None

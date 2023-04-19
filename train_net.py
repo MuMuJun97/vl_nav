@@ -99,7 +99,7 @@ def main():
         if args.trainval_step > 0:
             val_dataset = BaseDataset(
                 config=global_cfg.Dataset,
-                split="val_seen",
+                split="val_unseen",
                 training=False
             )
             val_dataset, val_dataloader, val_sampler = build_dataloader(
@@ -153,18 +153,19 @@ def main():
         ddp_model.train()
         min_val_loss = 1e+10
         for epoch in range(resume_from_epoch, args.num_epochs):
-            global_step = train_one_epoch(
-                args=args,
-                model=ddp_model,
-                epoch=epoch,
-                data_loader=dataloader,
-                tokenizer=tokenizer,
-                optimizer=optimizer,
-                lr_scheduler=lr_scheduler,
-                device_id=device_id,
-                tb_log=tb_log,
-                logger=logger
-            )
+            # 调试:
+            # global_step = train_one_epoch(
+            #     args=args,
+            #     model=ddp_model,
+            #     epoch=epoch,
+            #     data_loader=dataloader,
+            #     tokenizer=tokenizer,
+            #     optimizer=optimizer,
+            #     lr_scheduler=lr_scheduler,
+            #     device_id=device_id,
+            #     tb_log=tb_log,
+            #     logger=logger
+            # )
 
             ### train with validation
             if args.trainval_step > 0 and epoch % args.trainval_step == 0:

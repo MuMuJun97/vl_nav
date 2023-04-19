@@ -460,6 +460,7 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                     item_instr2view['qa']['answer'] = answer_instr2view
                     item_instr2view['viewpoint'] = viewpoint
                     item_instr2view['ViewpointNext'] = ViewpointNext
+                    item_instr2view['qa_type'] = 'instr2view'
 
                 ###### [2] qa type: give ViewID, ask instruction ######
                 # "how to get to direction {ViewID}?"
@@ -507,6 +508,7 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                     item_view2instr['qa']['answer'] = answer_view2instr
                     item_view2instr['viewpoint'] = viewpoint
                     item_view2instr['ViewpointNext'] = ViewpointNext
+                    item_view2instr['qa_type'] = 'view2instr'
 
                 # # qa type 3: give instruction, ask next action: STOP
                 # question_stop = "Question:{}".format(
@@ -560,7 +562,7 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
     print('[INFO] there are {:.2f}% ({}/{}) STOP samples in Fine-grained R2R dataset'.format(
         (len(stop_cases)/stop_sum),len(stop_cases),stop_sum
     ))
-    return res_data
+    return res_data,answers_type
 
 
 def generate_direction_from_mp3d(navigable_loc, mode="all"):

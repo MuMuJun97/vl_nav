@@ -51,13 +51,14 @@ class BaseDataset(torch_data.Dataset):
         if 'FR2R' in self.source_data:
             fr2r_file = root_dir / config.FR2R.DIR / config.FR2R.SPLIT[split]
             # read Fine-grained data
-            self.fr2r_data = preprocess_fr2r(
+            self.fr2r_data,self.fr2r_answers_counter = preprocess_fr2r(
                 fr2r_file,
                 self.navigable_loc,
             )
             self.data += self.fr2r_data
         else:
             self.fr2r_data = []
+            self.fr2r_answers_counter = None
 
         # '</s>'
         self.tokenizer_eos_token = self.config.tokenizer.eos_token
@@ -258,6 +259,7 @@ class BaseDataset(torch_data.Dataset):
         return input_text
 
     def get_data_dict(self, item, scan, index):
+        data_dict = dict()
 
         ### [1] Fine-grained R2R Dataset
         if index >= len(self.soon_data):
@@ -270,8 +272,15 @@ class BaseDataset(torch_data.Dataset):
             view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
             # ViewpointNext = item['ViewpointNext']  # next direction {0..11}, -1 means STOP
 
+            if item['qa_type'] == 'instr2view':
+                instr2view_id = answer.replace('Answer:','')
+                data_dict['instr2view_id'] = instr2view_id
+            else:
+                data_dict['instr2view_id'] = ''
+
         ### [2] SOON Dataset
         else:
+            data_dict['instr2view_id'] = ''
             question = item['qa']['question']
             answer = item['qa']['answer']
             vp_index = -1  # end viewpoint
@@ -286,21 +295,22 @@ class BaseDataset(torch_data.Dataset):
         )
 
         if self.img_dir is not None:
-            data_dict = {
+            data_dict.update({
                 'input_text': input_text,
                 'imgs': view_fts,
-            }
+            })
         else:
-            data_dict = {
+            data_dict.update({
                 'input_text': input_text,
                 'img_feats': view_fts[:, :self.config.image_feat_size],
                 'obj_feats': obj_img_fts[:, :self.config.obj_feat_size] if self.obj_ft_file is not None else None,
-            }
+            })
             if data_dict.get('obj_feats', None) is None:
                 data_dict.pop('obj_feats')
         return data_dict
 
     def __getitem__(self, index):
+        index += 3000
         if self.generate_start_index is not None:
             index += self.generate_start_index
 
@@ -322,7 +332,7 @@ class BaseDataset(torch_data.Dataset):
         ret = {}
         for key, val in data_dict.items():
             try:
-                if key in ['input_text','sample_idx']:
+                if key in ['input_text','sample_idx','instr2view_id']:
                     ret[key] = val
                 elif key in ['imgs']:
                     ret[key] = torch.stack(val, 0)
