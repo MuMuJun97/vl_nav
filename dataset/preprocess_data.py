@@ -330,6 +330,16 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
     enable_instr2view = True
     enable_view2instr = True
 
+    w1,w2,w3 = 0,0,10
+    probability_weight = {
+        -1: w1, 0: w2, 1: w3, 2:w3, 3:w2, 4:w3, 5:w3, 6:w2, 7:w3, 8:w3, 9:w2, 10:w3, 11:w3
+    }
+    w3_elements = [1,2,4,5,7,8,10,11]
+    w1,w2,w3 = 4,3,2
+    probability_weight_stop = {
+        -1: w1, 0: w2, 1: w3, 2:w3, 3:w2, 4:w3, 5:w3, 6:w2, 7:w3, 8:w3, 9:w2, 10:w3, 11:w3
+    }
+
     for idx, _ in enumerate(pbar):
         for j,chunk in enumerate(fr2r_data[idx]['chunk_view']):
             for k,sub_path in enumerate(chunk):
@@ -380,6 +390,12 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                 if len(item['navigable_pathViewIds']) < 1:
                     continue
 
+                if len(item['navigable_pathViewIds']) == 1 and item['navigable_pathViewIds'][0] == -1:
+                    # stop_dropout = 0.2
+                    # if random.random() > stop_dropout:
+                    #     continue
+                    continue
+
                 # # remove cases: only STOP action
                 # if item['navigable_pathViewIds'][-1] == -1 and len(item['navigable_pathViewIds']) < 2:
                 #     continue
@@ -407,18 +423,26 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                     )
 
                     # query next step:
-                    if item['navigable_pathViewIds'][-1] == -1: # next step: STOP
-                        prob = random.random()
-                        if prob < 0.2:
-                            vp_index = random.randint(0, len(item['path']) - 1)
-                        elif len(item['path']) == 1:
-                            vp_index = random.randint(0, len(item['path']) - 1)
-                        elif len(item['path']) > 1:
-                            # not consider STOP.
-                            vp_index = random.randint(0, len(item['path']) - 2)
+                    # if item['navigable_pathViewIds'][-1] == -1: # next step: STOP
+                    #     prob = random.random()
+                    #     if prob < 0.2:
+                    #         vp_index = random.randint(0, len(item['path']) - 1)
+                    #     elif len(item['path']) == 1:
+                    #         vp_index = random.randint(0, len(item['path']) - 1)
+                    #     elif len(item['path']) > 1:
+                    #         # not consider STOP.
+                    #         vp_index = random.randint(0, len(item['path']) - 2)
+                    # else:
+                    #     vp_index = random.randint(0, len(item['path']) - 1)
+                    # ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
+
+                    check_w3 = [1 if vi in w3_elements else 0 for vi in item['navigable_pathViewIds']]
+                    if sum(check_w3) == 0:
+                        weights = [probability_weight_stop[pi] for pi in item['navigable_pathViewIds']]
                     else:
-                        vp_index = random.randint(0, len(item['path']) - 1)
-                    ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
+                        weights = [probability_weight[pi] for pi in item['navigable_pathViewIds']]
+                    vp_index = random.choices(list(range(len(weights))),weights=weights,k=1)[0]
+                    ViewpointNext = item['navigable_pathViewIds'][vp_index]
 
                     if ViewpointNext == -1:
                         answers_type['stop'] += 1
@@ -440,19 +464,28 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
                 ###### [2] qa type: give ViewID, ask instruction ######
                 # "how to get to direction {ViewID}?"
                 if enable_view2instr:
-                    # query next step:
-                    if item['navigable_pathViewIds'][-1] == -1: # next step: STOP
-                        prob = random.random()
-                        if prob < 0.2:
-                            vp_index = random.randint(0, len(item['path']) - 1)
-                        elif len(item['path']) == 1:
-                            vp_index = random.randint(0, len(item['path']) - 1)
-                        elif len(item['path']) > 1:
-                            # not consider STOP.
-                            vp_index = random.randint(0, len(item['path']) - 2)
+
+                    # # query next step:
+                    # if item['navigable_pathViewIds'][-1] == -1: # next step: STOP
+                    #     prob = random.random()
+                    #     if prob < 0.2:
+                    #         vp_index = random.randint(0, len(item['path']) - 1)
+                    #     elif len(item['path']) == 1:
+                    #         vp_index = random.randint(0, len(item['path']) - 1)
+                    #     elif len(item['path']) > 1:
+                    #         # not consider STOP.
+                    #         vp_index = random.randint(0, len(item['path']) - 2)
+                    # else:
+                    #     vp_index = random.randint(0, len(item['path']) - 1)
+                    # ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
+
+                    check_w3 = [1 if vi in w3_elements else 0 for vi in item['navigable_pathViewIds']]
+                    if sum(check_w3) == 0:
+                        weights = [probability_weight_stop[pi] for pi in item['navigable_pathViewIds']]
                     else:
-                        vp_index = random.randint(0, len(item['path']) - 1)
-                    ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
+                        weights = [probability_weight[pi] for pi in item['navigable_pathViewIds']]
+                    vp_index = random.choices(list(range(len(weights))),weights=weights,k=1)[0]
+                    ViewpointNext = item['navigable_pathViewIds'][vp_index]
 
                     if ViewpointNext == -1:
                         question_view2instr = "Question:{}".format(
