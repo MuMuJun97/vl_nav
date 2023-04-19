@@ -294,6 +294,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
                     predictions.update(per_pred)
 
             ########## Compute Acc ##########
+            predlogit = torch.argmax(logits, dim=-1)
             for bs in range(input_ids.shape[0]):
                 instr2view_id = batch_dict['instr2view_id'][bs]
                 if instr2view_id == '':
@@ -301,7 +302,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
                 ed_idx = (labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
                 ed_idx += 2  # "?Answer:"
                 gt_id = labels[bs, ed_idx]
-                pred_id = logits[bs, ed_idx - 1]
+                pred_id = predlogit[bs, ed_idx - 1]
                 if instr2view_id == 'stop':
                     view_preds['sum_stop'] += 1
                     if gt_id == pred_id:
@@ -314,7 +315,7 @@ def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
         ########## Compute Acc ##########
         tmp_predictions = all_gather(view_preds)
         for per_pred in tmp_predictions:
-            for k, v in per_pred:
+            for k, v in per_pred.items():
                 all_view_preds[k] += v
         pred_acc = 'Acc:\n'
         all_pred = all_sum = 0
@@ -460,9 +461,9 @@ def forward_with_loss(
         use_local_vision=use_local_vision,
     )
     loss = outputs[0]
-    logits = torch.argmax(outputs[1],dim=-1)
 
     ########### Compute Acc ###########
+    logits = torch.argmax(outputs[1], dim=-1)
     for bs in range(input_ids.shape[0]):
         instr2view_id = batch_dict['instr2view_id'][bs]
         if instr2view_id == '':
@@ -752,7 +753,7 @@ def val_one_epoch(args,model,epoch,data_loader,tokenizer,global_cfg,device_id,tb
     ########### eval acc ###########
     tmp_predictions = all_gather(predictions)
     for per_pred in tmp_predictions:
-        for k,v in per_pred:
+        for k,v in per_pred.items():
             all_predictions[k] += v
 
     pred_acc = 'Acc:\n'

@@ -310,7 +310,6 @@ class BaseDataset(torch_data.Dataset):
         return data_dict
 
     def __getitem__(self, index):
-        index += 3000
         if self.generate_start_index is not None:
             index += self.generate_start_index
 
