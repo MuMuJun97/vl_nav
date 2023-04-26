@@ -97,6 +97,13 @@ def main():
     lr_scheduler = get_constant_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps)
 
     # TODO : check if a checkpoint exists for this run
+    resume_from_epoch, global_step = check_checkpoint(
+        args,
+        model,
+        optimizer=None,
+        lr_scheduler=None,
+        logger=logger
+    )
 
     if args.distributed:
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -241,6 +248,9 @@ def main():
             ########## [5] MakeAction ##########
             pred_viewpoint = []
             for bs in range(batch_size):
+
+                episode_pred[obs[bs]['instr_id']]["{}_generate_text".format(t)] = outputs[bs]
+
                 if ended[bs] or (t == episode_len - 1):
                     pred_viewpoint.append(None)
                     ended[bs] = True
