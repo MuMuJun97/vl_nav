@@ -327,6 +327,16 @@ def main():
     print('[INFO] oracle_success acc: {:.2f} %'.format(100*(oracle_acc/acc_sum)))
     print('[INFO] success_rate acc: {:.2f} %'.format(100 * (success_acc / acc_sum)))
 
+    if args.rank == 0:
+        import json
+        r2r_pred_file = Path(args.run_name) / (
+            'r2r_{}_eval_{}.json'.format(
+                args.split,
+                datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+            ))
+        with open(str(r2r_pred_file), 'w') as f:
+            json.dump(predictions, f, indent=2)
+
 
 if __name__ == "__main__":
     main()
