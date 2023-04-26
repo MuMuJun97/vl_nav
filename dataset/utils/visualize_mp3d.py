@@ -137,21 +137,24 @@ def add_vp_on_img(img, vp_id):
     )
     return img
 
-def add_token_on_img(img,token):
+def add_token_on_img(img,token,color=(255,0,0),height=None):
     img_height = img.shape[0]
     img_width = img.shape[1]
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_size = 2.0
-    thickness = 6
+    font_size = 1.0
+    thickness = 2
     text_width = cv2.getTextSize(token, font, font_size, thickness)[0][0]
     start_width = int(img_width / 2 - text_width / 2)
+    if height is None:
+        height = int(img_height / 5)
     cv2.putText(
         img,
         token,
-        (start_width, int(img_height / 5)),
+        # (start_width, int(img_height / 5)),
+        (start_width, height),
         font,
         font_size,
-        (255, 0, 0),
+        color,
         thickness,
         lineType=cv2.LINE_AA,
     )

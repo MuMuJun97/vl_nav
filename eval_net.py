@@ -35,7 +35,7 @@ def main():
 
     device_id = init_distributed_device(args) # TODO multi-GPU training.
 
-    log_file = Path(args.run_name) / ('train_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+    log_file = Path(args.run_name) / ('eval_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
 
     from tools import common_utils
     logger = common_utils.create_logger(log_file, rank=args.rank)
@@ -58,6 +58,7 @@ def main():
         cross_attn_every_n_layers=args.cross_attn_every_n_layers, # 1
         use_local_files=args.offline, # False
         use_media_placement_augmentation=args.use_media_placement_augmentation, # True
+        unfreeze_llm=args.unfreeze_llm,  # unfreeze language model
     )
 
     ################### Word Tokens ###################
@@ -110,14 +111,18 @@ def main():
         global_cfg=global_cfg,
         model=ddp_model,
         tokenizer=tokenizer,
-        device_id=device_id
+        device_id=device_id,
+        logger=logger,
     )
-    val_pred_file = Path(args.run_name) / (
-        'val_pred_{}.json'.format(
-            datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        ))
-    with open(str(val_pred_file), 'w') as f:
-        json.dump(predictions, f, indent=2)
+
+    if args.rank == 0:
+        val_pred_file = Path(args.run_name) / (
+            'split_{}_generate_pred_{}.json'.format(
+                args.generate_split,
+                datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+            ))
+        with open(str(val_pred_file), 'w') as f:
+            json.dump(predictions, f, indent=2)
     logger.info("[Training with Validation Loss {:.2f}]".format(val_loss))
 
 

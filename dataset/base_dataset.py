@@ -2,7 +2,11 @@ import pickle
 import random
 from collections import defaultdict
 import numpy as np
-from .preprocess_data import preprocess_soon_v1,preprocess_fr2r,promptQAs
+from .preprocess_data import (
+    preprocess_soon_v1,preprocess_fr2r,
+    promptQAs,
+    generate_direction_from_mp3d
+)
 from tools.train import common_utils
 from PIL import Image
 import torch
@@ -29,6 +33,8 @@ class BaseDataset(torch_data.Dataset):
         # read Matterport3D navigableLocations
         self.navigable_loc = self.get_navigable_Locations()
 
+        # generate_direction_from_mp3d(self.navigable_loc)
+
         self.source_data = config.SOURCE
         print('[INFO] ********* use dataset : {} *********'.format(self.source_data))
         self.data = []
@@ -45,13 +51,14 @@ class BaseDataset(torch_data.Dataset):
         if 'FR2R' in self.source_data:
             fr2r_file = root_dir / config.FR2R.DIR / config.FR2R.SPLIT[split]
             # read Fine-grained data
-            self.fr2r_data = preprocess_fr2r(
+            self.fr2r_data,self.fr2r_answers_counter = preprocess_fr2r(
                 fr2r_file,
                 self.navigable_loc,
             )
             self.data += self.fr2r_data
         else:
             self.fr2r_data = []
+            self.fr2r_answers_counter = None
 
         # '</s>'
         self.tokenizer_eos_token = self.config.tokenizer.eos_token
@@ -86,6 +93,11 @@ class BaseDataset(torch_data.Dataset):
             self.generate_start_index = kwargs['generate_start_index']
         else:
             self.generate_start_index = None
+
+        if kwargs.get('save_img',None) is not None:
+            self.save_img = kwargs['save_img']
+        else:
+            self.save_img = None
 
         print('Dataset Initialize')
 
@@ -122,11 +134,11 @@ class BaseDataset(torch_data.Dataset):
         assert img_file.exists()
         img = cv2.imread(str(img_file)) # BRG
 
-        # if self.generate_start_index is not None:
-        #     save_dir = self.img_dir.parent / 'samples'
-        #     save_dir.mkdir(parents=True, exist_ok=True)
-        #     save_file = save_dir / "{}_{}_{}.png".format(index,scan,viewpoint)
-        #     cv2.imwrite(str(save_file),img)
+        if self.save_img is not None:
+            save_dir = self.img_dir.parent / 'samples'
+            save_dir.mkdir(parents=True, exist_ok=True)
+            save_file = save_dir / "{}_{}_{}.png".format(index,scan,viewpoint)
+            cv2.imwrite(str(save_file),img)
 
         imgs = np.hsplit(img,12)
 
@@ -247,36 +259,28 @@ class BaseDataset(torch_data.Dataset):
         return input_text
 
     def get_data_dict(self, item, scan, index):
+        data_dict = dict()
 
         ### [1] Fine-grained R2R Dataset
         if index >= len(self.soon_data):
 
-            vp_index = 0 # start viewpoint
-
-            if self.training:
-                vp_index = random.randint(0,len(item['path'])-1)
+            question = item['qa']['question']
+            answer = item['qa']['answer']
 
             # for fine-grained dataset: sub-path <-> sub-instruction
-            viewpoint = item['path'][vp_index]
+            viewpoint = item['viewpoint']
             view_fts, obj_img_fts, obj_attrs = self.get_image_data(scan, viewpoint, index)
-            ViewpointNext = item['navigable_pathViewIds'][vp_index]  # next direction {0..11}, -1 means STOP
+            # ViewpointNext = item['ViewpointNext']  # next direction {0..11}, -1 means STOP
 
-            if ViewpointNext == -1:
-                # [1] next step is STOP
-                question = item['qa']['question_instr2view'] # instr->next step
-                answer = 'Answer:stop'
+            if item['qa_type'] == 'instr2view':
+                instr2view_id = answer.replace('Answer:','')
+                data_dict['instr2view_id'] = instr2view_id
             else:
-                if index % 2 == 0:
-                    question = item['qa']['question_instr2view']  # [2] instr->next step
-                    answer = item['qa']['answer_instr2view']
-                    answer = answer.format(ViewID=ViewpointNext)
-                else:
-                    question = item['qa']['question_view2instr']  # [3] give view->instruction
-                    question = question.format(ViewID=ViewpointNext)
-                    answer = item['qa']['answer_view2instr']
+                data_dict['instr2view_id'] = ''
 
         ### [2] SOON Dataset
         else:
+            data_dict['instr2view_id'] = ''
             question = item['qa']['question']
             answer = item['qa']['answer']
             vp_index = -1  # end viewpoint
@@ -291,16 +295,16 @@ class BaseDataset(torch_data.Dataset):
         )
 
         if self.img_dir is not None:
-            data_dict = {
+            data_dict.update({
                 'input_text': input_text,
                 'imgs': view_fts,
-            }
+            })
         else:
-            data_dict = {
+            data_dict.update({
                 'input_text': input_text,
                 'img_feats': view_fts[:, :self.config.image_feat_size],
                 'obj_feats': obj_img_fts[:, :self.config.obj_feat_size] if self.obj_ft_file is not None else None,
-            }
+            })
             if data_dict.get('obj_feats', None) is None:
                 data_dict.pop('obj_feats')
         return data_dict
@@ -327,7 +331,7 @@ class BaseDataset(torch_data.Dataset):
         ret = {}
         for key, val in data_dict.items():
             try:
-                if key in ['input_text','sample_idx']:
+                if key in ['input_text','sample_idx','instr2view_id']:
                     ret[key] = val
                 elif key in ['imgs']:
                     ret[key] = torch.stack(val, 0)

@@ -99,7 +99,7 @@ def main():
         if args.trainval_step > 0:
             val_dataset = BaseDataset(
                 config=global_cfg.Dataset,
-                split="val_seen",
+                split="val_unseen",
                 training=False
             )
             val_dataset, val_dataloader, val_sampler = build_dataloader(
@@ -203,6 +203,8 @@ def main():
     else:
         print("[ERROR] Please use \"eval_net.py\" for evaluation")
         exit()
+
+    logger.info("************************ END ************************")
 
 if __name__ == "__main__":
     main()
