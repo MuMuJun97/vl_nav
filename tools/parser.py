@@ -37,10 +37,10 @@ def read_args():
 
     ############# EVAL #############
     parser.add_argument('--text_generate', default=False, action="store_true", help='text generate')
-    parser.add_argument('--generate_split', type=str, default="val_seen", help='train,val_unseen,')
+    parser.add_argument('--generate_split', type=str, default="val_unseen", help='train,val_seen,')
     parser.add_argument('--generate_start_index', type=int, default=0, help='start index')
     parser.add_argument('--save_img', action="store_true", help='generate and save imgs')
-    parser.add_argument('--generate_nums', type=int, default=40,
+    parser.add_argument('--generate_nums', type=int, default=10000,
                         help='text generate nums; generate_nums = 0: eval all data')
 
     ############# MODEL #############

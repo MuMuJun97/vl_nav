@@ -16,6 +16,7 @@ class Flamingo(nn.Module):
         vis_dim: int,
         cross_attn_every_n_layers: int = 1,
         use_media_placement_augmentation: bool = False,
+        view_nums: int = 12,
     ):
         """
         Args:
@@ -34,12 +35,7 @@ class Flamingo(nn.Module):
         self.use_media_placement_augmentation = use_media_placement_augmentation
         self.vis_dim = vis_dim
         self.vision_encoder = vision_encoder
-        # self.perceiver = PerceiverResampler(dim=self.vis_dim)
-        self.mapper = nn.Sequential(
-            nn.Linear(768, 4096),
-            nn.LayerNorm(4096)
-        )
-
+        self.perceiver = PerceiverResampler(dim=self.vis_dim)
 
         self.lang_encoder = lang_encoder
         self.lang_encoder.init_flamingo(
@@ -48,6 +44,17 @@ class Flamingo(nn.Module):
             cross_attn_every_n_layers=cross_attn_every_n_layers,
             use_media_placement_augmentation=self.use_media_placement_augmentation,
         )
+
+        # @1 self.vis_dim: CLIP image feature dim;
+        # @2 LLaMa, hidden size
+        self.mapper = nn.Sequential(
+            nn.Linear(self.vis_dim, self.lang_encoder.config.hidden_size),
+            nn.LayerNorm(self.lang_encoder.config.hidden_size)
+        )
+        # @param: img views
+        self.view_nums = view_nums
+        self.img_id_embedding = nn.Embedding(view_nums, self.lang_encoder.config.hidden_size)
+
 
     def forward_train(
         self,
@@ -295,10 +302,15 @@ class Flamingo(nn.Module):
             vision_x = self.vision_encoder.visual(vision_x)[1]
         vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
 
-        # vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
+        vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
         vision_x = self.mapper(vision_x.mean(dim=-2))
 
-        self.lang_encoder.condition_vis_x(vision_x)
+        # view embedding
+        view_id_tensor = torch.arange(vision_x.shape[1], device=vision_x.device).repeat((vision_x.shape[0], 1))
+        view_id_embeds = self.img_id_embedding(view_id_tensor)
+        view_vision_x = vision_x + view_id_embeds
+
+        self.lang_encoder.condition_vis_x(view_vision_x)
         # for layer in self.lang_encoder._get_decoder_layers():
         #     layer.condition_vis_x(vision_x)
 

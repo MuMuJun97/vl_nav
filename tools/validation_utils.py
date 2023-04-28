@@ -294,45 +294,46 @@ def text_generate(args, global_cfg, model, tokenizer, device_id, logger):
                     predictions.update(per_pred)
 
             ########## Compute Acc ##########
-            predlogit = torch.argmax(logits, dim=-1)
-            for bs in range(input_ids.shape[0]):
-                instr2view_id = batch_dict['instr2view_id'][bs]
-                if instr2view_id == '':
-                    continue
-                ed_idx = (labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
-                ed_idx += 2  # "?Answer:"
-                gt_id = labels[bs, ed_idx]
-                pred_id = predlogit[bs, ed_idx - 1]
-                if instr2view_id == 'stop':
-                    view_preds['sum_stop'] += 1
-                    if gt_id == pred_id:
-                        view_preds['stop'] += 1
-                else:
-                    view_preds['sum_{}'.format(instr2view_id)] += 1
-                    if gt_id == pred_id:
-                        view_preds[int(instr2view_id)] += 1
+            # predlogit = torch.argmax(logits, dim=-1)
+            # for bs in range(input_ids.shape[0]):
+            #     instr2view_id = batch_dict['instr2view_id'][bs]
+            #     if instr2view_id == '':
+            #         continue
+            #     ed_idx = (labels[bs] == args.answer_token_id).nonzero(as_tuple=True)[0]
+            #     ed_idx += 2  # "?Answer:"
+            #     endofchunk_token_idx = (labels[bs] == args.endofchunk_token_id).nonzero(as_tuple=True)[0]
+            #     gt_id = labels[bs, ed_idx:]
+            #     pred_id = predlogit[bs, (ed_idx-1):]
+            #     if instr2view_id == 'stop':
+            #         view_preds['sum_stop'] += 1
+            #         if gt_id == pred_id:
+            #             view_preds['stop'] += 1
+            #     else:
+            #         view_preds['sum_{}'.format(instr2view_id)] += 1
+            #         if gt_id == pred_id:
+            #             view_preds[int(instr2view_id)] += 1
 
         ########## Compute Acc ##########
-        tmp_predictions = all_gather(view_preds)
-        for per_pred in tmp_predictions:
-            for k, v in per_pred.items():
-                all_view_preds[k] += v
-        pred_acc = 'Acc:\n'
-        all_pred = all_sum = 0
-        for pi in range(12):
-            all_pred += all_view_preds[pi]
-            all_sum += all_view_preds['sum_{}'.format(pi)]
-            pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
-                pi, (all_view_preds[pi] * 100 / all_view_preds['sum_{}'.format(pi)]),
-                all_view_preds[pi], all_view_preds['sum_{}'.format(pi)])
-        pi = 'stop'
-        all_pred += all_view_preds[pi]
-        all_sum += all_view_preds['sum_{}'.format(pi)]
-        pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
-            pi, (all_view_preds[pi] * 100 / all_view_preds['sum_{}'.format(pi)]),
-            all_view_preds[pi], all_view_preds['sum_{}'.format(pi)])
-        pred_acc += "mean acc: {:.2f}% ({}/{})\n".format(100 * (all_pred / all_sum), all_pred, all_sum)
-        logger.info(pred_acc)
+        # tmp_predictions = all_gather(view_preds)
+        # for per_pred in tmp_predictions:
+        #     for k, v in per_pred.items():
+        #         all_view_preds[k] += v
+        # pred_acc = 'Acc:\n'
+        # all_pred = all_sum = 0
+        # for pi in range(12):
+        #     all_pred += all_view_preds[pi]
+        #     all_sum += all_view_preds['sum_{}'.format(pi)]
+        #     pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
+        #         pi, (all_view_preds[pi] * 100 / all_view_preds['sum_{}'.format(pi)]),
+        #         all_view_preds[pi], all_view_preds['sum_{}'.format(pi)])
+        # pi = 'stop'
+        # all_pred += all_view_preds[pi]
+        # all_sum += all_view_preds['sum_{}'.format(pi)]
+        # pred_acc += "[{}]: {:.2f}% ({}/{})\n".format(
+        #     pi, (all_view_preds[pi] * 100 / all_view_preds['sum_{}'.format(pi)]),
+        #     all_view_preds[pi], all_view_preds['sum_{}'.format(pi)])
+        # pred_acc += "mean acc: {:.2f}% ({}/{})\n".format(100 * (all_pred / all_sum), all_pred, all_sum)
+        # logger.info(pred_acc)
 
     val_loss = loss_metric.average
     predictions['val_mean_loss'] = val_loss
