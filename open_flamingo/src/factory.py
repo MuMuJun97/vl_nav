@@ -5,6 +5,48 @@ from .flamingo import Flamingo
 from .flamingo_lm import FlamingoLMMixin
 from .utils import extend_instance
 
+def llama_model_in_debug_model(lang_encoder_path):
+    from transformers.models.llama import LlamaForCausalLM
+    from transformers.utils import ContextManagers
+    from transformers.modeling_utils import no_init_weights
+    from transformers.generation import GenerationConfig
+    # Instantiate model.
+    init_contexts = [no_init_weights(_enable=True)]
+    import pickle
+    from pathlib import Path
+    with open(lang_encoder_path, "rb") as f:
+        config = pickle.load(f)
+    model_args = ()
+    model_kwargs = {}
+    with ContextManagers(init_contexts):
+        model = LlamaForCausalLM(config, *model_args, **model_kwargs)
+    model.is_loaded_in_8bit = False
+    # make sure token embedding weights are still tied if needed
+    model.tie_weights()
+    # Set model in evaluation mode to deactivate DropOut modules by default
+    model.eval()
+    # If it is a model with generation capabilities, attempt to load the generation config
+    if model.can_generate():
+        pretrained_model_name_or_path = Path(lang_encoder_path).parent.resolve().__str__()
+        try:
+            kwargs = {}
+            model.generation_config = GenerationConfig.from_pretrained(
+                pretrained_model_name_or_path,
+                cache_dir=None,
+                force_download=False,
+                resume_download=False,
+                proxies=None,
+                local_files_only=False,
+                use_auth_token=None,
+                revision=None,
+                subfolder='',
+                _from_auto=False,
+                _from_pipeline=None,
+                **kwargs,
+            )
+        except Exception as e:
+            print(e)
+    return model
 
 def create_model_and_transforms(
     clip_vision_encoder_path: str,
@@ -35,6 +77,9 @@ def create_model_and_transforms(
         Image processor: Pipeline to preprocess input images
         Tokenizer: A tokenizer for the language model
     """
+    if 'model_config.pkl' in tokenizer_path:
+        from pathlib import Path
+        tokenizer_path = Path(tokenizer_path).parent.resolve().__str__()
     if enable_offline_vision_encoder:
         vision_encoder = None
         image_processor = None
@@ -57,9 +102,14 @@ def create_model_and_transforms(
         # modify labels for the loss.
         text_tokenizer.add_special_tokens({"pad_token": "<PAD>"})
 
-    lang_encoder = AutoModelForCausalLM.from_pretrained(
-        lang_encoder_path, local_files_only=use_local_files
-    )
+    # TODO: only for debug
+    if 'model_config.pkl' in lang_encoder_path:
+        lang_encoder = llama_model_in_debug_model(lang_encoder_path)
+    else:
+        lang_encoder = AutoModelForCausalLM.from_pretrained(
+            lang_encoder_path, local_files_only=use_local_files
+        )
+
     extend_instance(lang_encoder, FlamingoLMMixin)
 
     if decoder_layers_attr_name is None:
@@ -73,6 +123,7 @@ def create_model_and_transforms(
     else:
         unfreeze_llm = False
 
+    lang_encoder = lang_encoder.bfloat16()
     # TODO ? endofchunk: how to modify?
     # cross_attn_every_n_layers: multi-modal cross fusion layer.
     model = Flamingo(
@@ -90,11 +141,14 @@ def create_model_and_transforms(
 
     # Freeze all parameters
     model.requires_grad_(False)
-    assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
+    # assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
 
-    # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
-    model.perceiver.requires_grad_(True)
-    model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
+    # # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
+    # model.perceiver.requires_grad_(True)
+    model.mapper.requires_grad_(True)
+    model.lang_encoder.requires_grad_(True)
+
+    # model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
     model.lang_encoder.get_input_embeddings().requires_grad_(True)
 
     print(

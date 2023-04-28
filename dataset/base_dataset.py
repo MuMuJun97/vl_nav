@@ -222,7 +222,7 @@ class BaseDataset(torch_data.Dataset):
 
         # environment = "".join(["<image>" if i==1 else "<image>" for i in view_mask])
         use_image_id = self.prompt.image_id
-        environment = "".join(["<image>-direction {};".format(i) if use_image_id else "<image>" for i in range(12)])
+        environment = "".join(["{}. <image> ".format(i) if use_image_id else "<image>" for i in range(12)])
         environment = environment + "."
         question = " ".join(question.split())
         answer = " ".join(answer.split())
