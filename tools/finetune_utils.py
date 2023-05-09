@@ -438,7 +438,7 @@ def train_one_epoch(
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
-        loss_metric.accumulate(loss.data.item())
+        loss_metric.accumulate(traj_loss.data.item())
         if tb_log is not None:
             try:
                 cur_lr = float(optimizer.lr)
@@ -446,7 +446,7 @@ def train_one_epoch(
                 cur_lr = optimizer.param_groups[0]['lr']
 
             tb_log.add_scalar('meta_data/learning_rate', cur_lr, global_step)
-            tb_log.add_scalar('train/loss', loss.data.item(), global_step)
+            tb_log.add_scalar('train/loss', traj_loss.data.item(), global_step)
 
         pbar.update()
         pbar.set_postfix(dict(
@@ -454,3 +454,12 @@ def train_one_epoch(
             step=global_step,
             lr=cur_lr,
         ))
+
+        # Log loss to console
+        if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
+            logger.info(
+                f"\nStep {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. "
+                f"\nAverage Loss: {loss_metric.average:.3f}"
+            )
+
+    return global_step
