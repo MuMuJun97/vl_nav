@@ -17,6 +17,8 @@ class Flamingo(nn.Module):
         cross_attn_every_n_layers: int = 1,
         use_media_placement_augmentation: bool = False,
         view_nums: int = 12,
+        history_vision: bool = False,
+        state_token_id: int = 1,
     ):
         """
         Args:
@@ -38,11 +40,13 @@ class Flamingo(nn.Module):
         self.perceiver = PerceiverResampler(dim=self.vis_dim)
 
         self.lang_encoder = lang_encoder
+
         self.lang_encoder.init_flamingo(
             media_token_id=media_token_id,
             vis_hidden_size=self.vis_dim,
             cross_attn_every_n_layers=cross_attn_every_n_layers,
             use_media_placement_augmentation=self.use_media_placement_augmentation,
+            state_token_id=state_token_id,
         )
 
         # @1 self.vis_dim: CLIP image feature dim;
@@ -54,6 +58,14 @@ class Flamingo(nn.Module):
         # @param: img views
         self.view_nums = view_nums
         self.img_id_embedding = nn.Embedding(view_nums, self.lang_encoder.config.hidden_size)
+
+        self.have_state = False
+        self.history_vision = history_vision
+        if history_vision:
+            self.history_encoder = nn.Sequential(
+                nn.Linear(self.lang_encoder.config.hidden_size, self.lang_encoder.config.hidden_size),
+                nn.LayerNorm(self.lang_encoder.config.hidden_size)
+            )
 
 
     def forward_train(
@@ -67,6 +79,7 @@ class Flamingo(nn.Module):
         past_key_values=None,
         use_cache: bool = False,
         use_local_vision: str = 'none',
+        history_vis: int = -1,
     ):
         """
         Forward pass of Flamingo.
@@ -89,30 +102,33 @@ class Flamingo(nn.Module):
             use_cache: whether to use cached key values. See use_cache
                 documentation in Hugging Face CausalLM models.
             use_local_vision: VLN-DUET local image features.
+            history_vis: vision images - history state
         """
-
-        if use_local_vision == 'feature':
-            self._encode_vision_with_local(vision_x)
-        elif use_local_vision == 'image':
-            self._encode_multi_view_image(vision_x)
+        if history_vis != -1:
+            self.encode_vision_x_with_state(vision_x=vision_x,history_vis=history_vis)
         else:
-            assert (
-                           vision_x is not None
-                   ) or use_cached_vision_x, (
-                "Must provide either vision_x or use_cached_vision_x to True."
-            )
-
-            if use_cached_vision_x:
-                # Case: use cached; vision_x should be cached and other
-                # vision-related inputs should not be provided.
-                assert (
-                        vision_x is None
-                ), "Expect vision_x to be None when use_cached_vision_x is True."
-                assert self.lang_encoder.is_conditioned()
-
+            if use_local_vision == 'feature':
+                self._encode_vision_with_local(vision_x)
+            elif use_local_vision == 'image':
+                self._encode_multi_view_image(vision_x)
             else:
-                # Case: do not use caching (i.e. this is a standard forward pass);
-                self._encode_vision_x(vision_x=vision_x)
+                assert (
+                               vision_x is not None
+                       ) or use_cached_vision_x, (
+                    "Must provide either vision_x or use_cached_vision_x to True."
+                )
+
+                if use_cached_vision_x:
+                    # Case: use cached; vision_x should be cached and other
+                    # vision-related inputs should not be provided.
+                    assert (
+                            vision_x is None
+                    ), "Expect vision_x to be None when use_cached_vision_x is True."
+                    assert self.lang_encoder.is_conditioned()
+
+                else:
+                    # Case: do not use caching (i.e. this is a standard forward pass);
+                    self._encode_vision_x(vision_x=vision_x)
 
         output = self.lang_encoder(
             input_ids=lang_x,
@@ -124,6 +140,7 @@ class Flamingo(nn.Module):
 
         if clear_conditioned_layers:
             self.lang_encoder.clear_conditioned_layers()
+            # self.lang_encoder.clear_history_state()
 
         return output
 
@@ -140,6 +157,7 @@ class Flamingo(nn.Module):
         use_local_vision: str = 'none',
         mode: str = 'train',
         max_length: int = 20,
+        history_vis: bool = False,
     ):
         if mode == 'train':
             return self.forward_train(
@@ -151,7 +169,8 @@ class Flamingo(nn.Module):
                 clear_conditioned_layers=clear_conditioned_layers,
                 past_key_values=past_key_values,
                 use_cache=use_cache,
-                use_local_vision=use_local_vision
+                use_local_vision=use_local_vision,
+                history_vis=history_vis,
             )
         elif mode == 'generate':
             output_ids = self.greedy_inference(
@@ -313,6 +332,47 @@ class Flamingo(nn.Module):
         self.lang_encoder.condition_vis_x(view_vision_x)
         # for layer in self.lang_encoder._get_decoder_layers():
         #     layer.condition_vis_x(vision_x)
+
+    def encode_vision_x_with_state(self, vision_x: torch.Tensor, history_vis: int):
+        assert vision_x.ndim == 6, "vision_x should be of shape (b, T_img, F, C, H, W)"
+        b, T, F = vision_x.shape[:3]
+        assert F == 1, "Only single frame supported"
+
+        vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
+        with torch.no_grad():
+            vision_x = self.vision_encoder.visual(vision_x)[1]
+        vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
+
+        vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
+        vision_x = self.mapper(vision_x.mean(dim=-2))
+
+        # view embedding
+        view_id_tensor = torch.arange(vision_x.shape[1], device=vision_x.device).repeat((vision_x.shape[0], 1))
+        view_id_embeds = self.img_id_embedding(view_id_tensor)
+        view_vision_x = vision_x + view_id_embeds
+
+        self.lang_encoder.condition_vis_x(view_vision_x,has_state=True)
+
+        if history_vis == 0:
+            self.have_state = False
+            self.lang_encoder.clear_history_state()
+
+        if not self.have_state:
+            self.have_state = True
+            vision_state = self.history_encoder(
+                view_vision_x.mean(dim=-2).unsqueeze(1)
+            )
+            self.lang_encoder.set_history_state(vision_state) # [B,Dim]
+        else:
+            history_vision = self.lang_encoder.get_history_state()
+            vision_state = self.history_encoder(
+                view_vision_x.mean(dim=-2).unsqueeze(1)
+            )
+            # vision_state = torch.cat([view_vision_x.mean(dim=-2),history_vision],dim=-1)
+            # vision_state = self.history_encoder(vision_state)
+            vision_state = torch.cat([vision_state,history_vision],dim=1)
+            self.lang_encoder.set_history_state(vision_state)
+
 
     def prepare_inputs_for_generation(
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs

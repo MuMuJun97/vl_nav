@@ -16,6 +16,8 @@ def llama_model_in_debug_model(lang_encoder_path):
     from pathlib import Path
     with open(lang_encoder_path, "rb") as f:
         config = pickle.load(f)
+        config.intermediate_size = 512
+        config.num_hidden_layers = 1
     model_args = ()
     model_kwargs = {}
     with ContextManagers(init_contexts):
@@ -57,6 +59,7 @@ def create_model_and_transforms(
     cross_attn_every_n_layers: int = 1,
     use_local_files: bool = False,
     decoder_layers_attr_name: str = None,
+    r2r_tok: bool = False,
     **flamingo_kwargs,
 ):
     """
@@ -72,6 +75,7 @@ def create_model_and_transforms(
         cross_attn_every_n_layers (int, optional): determines how often to add a cross-attention layer. Defaults to 1.
         use_local_files (bool, optional): whether to use local files. Defaults to False.
         decoder_layers_attr_name (str, optional): name of the decoder layers attribute. Defaults to None.
+        r2r_tok (bool, optional): 是否添加新的tokens.
     Returns:
         Flamingo: Flamingo model from pretrained vision and language encoders
         Image processor: Pipeline to preprocess input images
@@ -94,8 +98,18 @@ def create_model_and_transforms(
         tokenizer_path, local_files_only=use_local_files
     )
     # add Flamingo special tokens to the tokenizer
+
+    if r2r_tok:
+        # add <walkto0-11>
+        action_tokens = ["<|endofchunk|>", "<image>"] \
+                        + ['<walkto{}>'.format(_) for _ in range(12)] \
+                        + ['<stop>','<Done>','<state>'] \
+                        + ['<image{}>'.format(x) for x in range(12)]
+    else:
+        action_tokens = ["<|endofchunk|>", "<image>", "<state>"]
+
     text_tokenizer.add_special_tokens(
-        {"additional_special_tokens": ["<|endofchunk|>", "<image>"]}
+        {"additional_special_tokens": action_tokens}
     )
     if text_tokenizer.pad_token is None:
         # Issue: GPT models don't have a pad token, which we use to
@@ -136,6 +150,8 @@ def create_model_and_transforms(
             "width"
         ],
         cross_attn_every_n_layers=cross_attn_every_n_layers,
+        history_vision=r2r_tok,
+        state_token_id=text_tokenizer.encode("<state>")[-1],
         **flamingo_kwargs,
     )
 
@@ -144,9 +160,14 @@ def create_model_and_transforms(
     # assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
 
     # # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
-    # model.perceiver.requires_grad_(True)
+
+    model.img_id_embedding.requires_grad_(True)
+    model.perceiver.requires_grad_(True)
     model.mapper.requires_grad_(True)
     model.lang_encoder.requires_grad_(True)
+
+    if r2r_tok:
+        model.history_encoder.requires_grad_(True)
 
     # model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
     model.lang_encoder.get_input_embeddings().requires_grad_(True)

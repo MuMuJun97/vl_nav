@@ -71,8 +71,18 @@ class FlamingoLMMixin(nn.Module):
     def _set_decoder_layers(self, value):
         setattr_recursive(self, self.decoder_layers_attr_name, value)
 
-    def condition_vis_x(self, vis_x):
+    def condition_vis_x(self, vis_x, has_state=False):
         self.vis_x = vis_x
+        self.has_state = has_state
+
+    def set_history_state(self, state):
+        self.state = state
+
+    def clear_history_state(self):
+        self.set_history_state(None)
+
+    def get_history_state(self):
+        return self.state
 
     def init_flamingo(
         self,
@@ -80,6 +90,7 @@ class FlamingoLMMixin(nn.Module):
         vis_hidden_size,
         cross_attn_every_n_layers,
         use_media_placement_augmentation,
+        state_token_id,
     ):
         """
         Initialize Flamingo by adding a new gated cross attn to the decoder.
@@ -109,6 +120,7 @@ class FlamingoLMMixin(nn.Module):
         self.media_token_id = media_token_id
         # self.use_media_placement_augmentation = use_media_placement_augmentation
         self.initialized_flamingo = True
+        self.state_token_id = state_token_id
 
     def forward(self, *input, **kwargs):
         """Condition the Flamingo layers on the media locations before forward()"""
@@ -123,6 +135,14 @@ class FlamingoLMMixin(nn.Module):
             inputs_embeds = self.model.embed_tokens(input_ids)
             media_shape = inputs_embeds[media_locations].shape
             inputs_embeds[media_locations] += self.vis_x.reshape(media_shape)
+
+            if self.has_state:
+                # history vision
+                state_locations = input_ids == self.state_token_id
+                state_shape = inputs_embeds[state_locations].shape
+                if state_shape[0] != 0:
+                    inputs_embeds[state_locations] += self.state.reshape(state_shape)
+
             kwargs["input_ids"] = None
             kwargs["inputs_embeds"] = inputs_embeds
         # attend_previous = (

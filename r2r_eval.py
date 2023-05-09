@@ -2,7 +2,6 @@ import os
 import pickle
 import random
 import re
-from tensorboardX import SummaryWriter
 import numpy as np
 from copy import deepcopy
 from PIL import Image
@@ -11,18 +10,16 @@ import yaml
 from tqdm import tqdm
 from pathlib import Path
 from easydict import EasyDict
-# from dataset.base_dataset import BaseDataset, build_dataloader
-from dataset.environment import R2RDataset,build_dataloader
+from dataset.base_dataset import BaseDataset, build_dataloader
+from dataset.environment import R2RNavBatch
 from transformers import get_constant_schedule_with_warmup
 from open_flamingo import create_model_and_transforms
 from tools.parser import read_args,random_seed
+from tools.train.train_utils import get_autocast, get_cast_dtype, AverageMeter
 from tools.train.distributed import world_info_from_env, init_distributed_device
 from tools.train.train_utils import (
     get_grouped_params, check_checkpoint,
     get_checkpoint, save_checkpoint,
-)
-from tools.finetune_utils import (
-    train_one_epoch
 )
 import datetime
 from dataset.preprocess_data import promptQAs
@@ -30,7 +27,6 @@ from dataset.preprocess_data import promptQAs
 
 def main():
     args = read_args()
-    args.r2r_tok = True # add new special tokens to tokenizer.
 
     ############# CONFIGURATION #############
     global_cfg = EasyDict(yaml.safe_load(open(str(Path(args.cfg_file).resolve()))))
@@ -65,7 +61,6 @@ def main():
         use_local_files=args.offline, # False
         use_media_placement_augmentation=args.use_media_placement_augmentation, # True
         unfreeze_llm=args.unfreeze_llm, # unfreeze language model
-        r2r_tok=args.r2r_tok,
     )
 
     ################### Word Tokens ###################
@@ -76,85 +71,23 @@ def main():
         "input_ids"
     ][-1]
     ### "<image> .Question:"
-    question_token_id = tokenizer("#Question", add_special_tokens=False)["input_ids"][-1]
-    answer_token_id = tokenizer("#Answer", add_special_tokens=False)["input_ids"][-1]
+    question_token_id = tokenizer(".Question", add_special_tokens=False)["input_ids"][-1]
+    answer_token_id = tokenizer("?Answer", add_special_tokens=False)["input_ids"][-1]
 
     args.media_token_id = media_token_id
     args.endofchunk_token_id = endofchunk_token_id
     args.question_token_id = question_token_id
     args.answer_token_id = answer_token_id
 
-    logger.info("**************************** Train ****************************")
+    logger.info("**************************** Eval ****************************")
 
     ############# DATASET #############
-    r2r_dataset = R2RDataset(
-        config=global_cfg.Dataset,
-        split=args.split,
-        training=False if args.split != 'train' else True,
-        logger=logger,
-        batch_size=args.batch_size,
-        seed=args.seed
-    )
+    r2rdataset = R2RNavBatch(config=global_cfg.Dataset)
 
-    r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
-        dataset=r2r_dataset,
-        batch_size=args.batch_size,
-        dist=args.distributed,
-        workers=args.workers,
-        training=False if args.split != 'train' else True
-    )
+    # TODO dataset, dataloader, sampler
 
-    ############# Init #############
     random_seed(args.seed, args.rank)
     print(f"Start running training on rank {args.rank}.")
-    # args.rank: global rank.
-    total_gpus = torch.cuda.device_count()
-    device_id = args.rank % total_gpus
-    model = model.to(device_id)
-    optimizer = torch.optim.AdamW(get_grouped_params(model, args), lr=args.learning_rate)
-    lr_scheduler = get_constant_schedule_with_warmup(
-        optimizer, num_warmup_steps=args.warmup_steps
-    )
-
-    resume_from_epoch = 0
-    # TODO : check if a checkpoint exists for this run
-
-    if args.distributed:
-        from torch.nn.parallel import DistributedDataParallel as DDP
-        ddp_model = DDP(model, device_ids=[device_id])
-        # args.batch_size: BATCH_SIZE_PER_GPU
-        logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
-    else:
-        total_gpus = 1
-        ddp_model = model
-        logger.info('Training with a single process')
-
-    total_training_steps = (
-                            len(r2r_dataset) // (args.batch_size * args.world_size)
-                        ) * args.num_epochs
-
-    logger.info(f"Total training steps: {total_training_steps}")
-    tb_log = SummaryWriter(log_dir=str(Path(args.run_name) / 'tensorboard')) if args.rank == 0 else None
-
-    ############# Train #############
-
-    for epoch in range(resume_from_epoch, args.num_epochs):
-        global_step = train_one_epoch(
-            args=args,
-            agent_config=global_cfg.Agent,
-            model=ddp_model,
-            epoch=epoch,
-            r2r_dataset=r2r_dataset,
-            r2r_dataloader=r2r_dataloader,
-            tokenizer=tokenizer,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            device_id=device_id,
-            tb_log=tb_log,
-            logger=logger
-        )
-
-    exit()
 
     # args.rank: global rank.
     total_gpus = torch.cuda.device_count()

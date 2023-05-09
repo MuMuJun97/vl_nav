@@ -1,6 +1,8 @@
 import numpy as np
 import math
 import json
+from open_clip.transform import image_transform
+import torch.utils.data as torch_data
 from pathlib import Path
 import random
 import os
@@ -8,6 +10,12 @@ import networkx as nx
 import cv2
 import copy
 import pickle
+import torch
+from torch.utils.data import DistributedSampler as _DistributedSampler
+from tools.train import common_utils
+from torch.utils.data import DataLoader
+from functools import partial
+from collections import defaultdict
 
 def new_simulator(connectivity_dir):
     try:
@@ -140,26 +148,24 @@ class Sim(object):
         self.state = None
         self.headingCount = headingCount
         self.navigable_loc = navigable_loc
-    def newEpisode(self, scanId, viewpointId, heading, elevation):
+
+    def newEpisode(self, scanId, viewpointId, heading, elevation=0):
         self.state = SimState(scanId=scanId,viewpointId=viewpointId,heading=heading,elevation=elevation)
-        nav_dict = self.navigable_loc[scanId][viewpointId]
+        nav_dict = self.navigable_loc[viewpointId]
         state_viewIndex = self.state.viewIndex - self.headingCount
         for k,v in nav_dict.items():
-            if v['pointId'] == state_viewIndex:
-                self.state.set_navigableLocations(v)
+            self.state.set_navigableLocations(v)
+            # if v['pointId'] == state_viewIndex:
+            #     self.state.set_navigableLocations(v)
 
     def getState(self):
         return self.state
 
-
 class EnvBatch(object):
-    def __init__(self,navigable_loc,connectivity_dir,img_dir,batch_size):
+    def __init__(self,shortest_paths,navigable_loc,img_dir,batch_size):
+        self.shortest_paths = shortest_paths
         self.img_dir = img_dir
-        # self.sims = []
-        # for i in range(batch_size):
-        #     sim = new_simulator(connectivity_dir=connectivity_dir)
-        #     self.sims.append(sim)
-
+        self.navigable_loc = navigable_loc
         self.msims = []
         for i in range(batch_size):
             msim = Sim(navigable_loc)
@@ -225,6 +231,70 @@ class EnvBatch(object):
         #     self.sims[i].makeAction([index], [heading], [elevation])
         raise NotImplementedError
 
+    def shortest_path_action(self, state, goalViewpointId, gt_path):
+        ''' Determine next action on the shortest path to goal, for supervised training. '''
+        if state.location.viewpointId == goalViewpointId:
+            # current viewpoint is the goal location
+            return state.location.viewpointId      # Just stop here
+        if state.location.viewpointId in gt_path:
+            nextViewpointId = gt_path[
+                gt_path.index(state.location.viewpointId)+1
+                ]
+        else:
+            path = self.shortest_paths[state.location.viewpointId][goalViewpointId]
+            nextViewpointId = path[1]
+        return nextViewpointId
+
+    def get_obs(self,target_vp,gt_path):
+        obs = []
+        states = self.getStates()
+        for i, (panoramic_img,state) in enumerate(states):
+
+            candidate = copy.deepcopy(self.navigable_loc[state.location.viewpointId])
+            candidate.pop(state.location.viewpointId) # remove self-viewpoint
+            new_candidate = copy.deepcopy(candidate)
+            view_id_candidate = dict()
+            candidate_view_id = dict()
+            for k,v in candidate.items():
+                if view_id_candidate.get(v['pointId'],None) is None:
+                    view_id_candidate[v['pointId']] = k
+                    candidate_view_id[k] = v['pointId']
+                else:
+                    prev_vp = view_id_candidate[v['pointId']]
+                    if k in gt_path:
+                        view_id_candidate.pop(v['pointId'])
+                        candidate_view_id.pop(prev_vp)
+                        new_candidate.pop(prev_vp)
+
+                        view_id_candidate[v['pointId']] = k
+                        candidate_view_id[k] = v['pointId']
+                    else:
+                        if v['distance'] < candidate[prev_vp]['distance'] and prev_vp not in gt_path:
+                            view_id_candidate.pop(v['pointId'])
+                            candidate_view_id.pop(prev_vp)
+                            new_candidate.pop(prev_vp)
+
+                            view_id_candidate[v['pointId']] = k
+                            candidate_view_id[k] = v['pointId']
+            del candidate
+            ob = {
+                'scan' : state.scanId,
+                'viewpoint' : state.location.viewpointId,
+                'viewIndex' : state.viewIndex,
+                'position': (state.location.x, state.location.y, state.location.z),
+                'heading' : state.heading,
+                'elevation' : state.elevation,
+                'candidate': new_candidate,
+                'teacher' : self.shortest_path_action(state, target_vp, gt_path),
+                'candidate_view_id': candidate_view_id,
+                'view_id_candidate': view_id_candidate,
+                'panoramic_img': panoramic_img,
+                'navigableLocations' : state.navigableLocations,
+            }
+            obs.append(ob)
+        return obs
+
+
 class R2RNavBatch(object):
     def __init__(self,config,split='train',logger=None,batch_size=2,seed=0):
         self.config = config
@@ -249,15 +319,14 @@ class R2RNavBatch(object):
         self.shortest_paths = {}
         for scan, G in self.graphs.items():  # compute all shortest paths
             self.shortest_paths[scan] = dict(nx.all_pairs_dijkstra_path(G))
-        self.shortest_distances = {}
-        for scan, G in self.graphs.items():  # compute all shortest paths
-            self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
+        # self.shortest_distances = {}
+        # for scan, G in self.graphs.items():  # compute all shortest paths
+        #     self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
 
         img_dir = Path(self.config.IMG_DIR).resolve()
 
         self.env = EnvBatch(
             navigable_loc=self.navigable_loc,
-            connectivity_dir=connectivity_dir,
             img_dir=img_dir,
             batch_size=batch_size
         )
@@ -477,3 +546,216 @@ class R2RNavBatch(object):
         # TODO CLS
 
         return scores
+
+
+############################### Dataset ###############################
+class R2RDataset(torch_data.Dataset):
+    def __init__(self, config, split='train', training=True, logger=None, batch_size=2, seed=0):
+        self.config = config
+        self.split = split
+        self.logger = logger
+        self.batch_size = batch_size
+        self.training = training
+        self.seed = seed
+
+        #### R2R Data ####
+        self.data_dir = Path(config.DATA_DIR).resolve()
+        root_dir = Path(__file__).parent.parent.resolve()
+        anno_file = root_dir/config.R2R.DIR/config.R2R.SPLIT[split]
+
+        self.data = self.load_instr_datasets(anno_file=anno_file)
+        self.scans = set([x['scan'] for x in self.data])
+        self.gt_trajs = self.get_gt_trajs(self.data)  # for evaluation
+
+        #### MP3D Connectivity Graph ####
+        self.navigable_loc = self.get_navigable_Locations()
+
+        #### connectivity graph ####
+        connectivity_dir = str(root_dir / 'data/connectivity')
+        graph_dict_file = root_dir / 'build/R2R/R2R_{}_graph_dict.pkl'.format(self.split)
+        if graph_dict_file.exists():
+            with open(str(graph_dict_file),"rb") as f:
+                graph_dict = pickle.load(f)
+                logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
+            self.graphs = graph_dict['graphs']
+            self.shortest_paths = graph_dict['shortest_paths']
+            # self.shortest_distances = graph_dict['shortest_distances']
+            del graph_dict
+        else:
+            self.graphs = load_nav_graphs(connectivity_dir, self.scans)
+            self.shortest_paths = {}
+            for scan, G in self.graphs.items():  # compute all shortest paths
+                self.shortest_paths[scan] = dict(nx.all_pairs_dijkstra_path(G))
+            self.shortest_distances = {}
+            for scan, G in self.graphs.items():  # compute all shortest paths
+                self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
+            graph_dict = {'graphs': self.graphs, 'shortest_paths': self.shortest_paths,
+                          'shortest_distances': self.shortest_distances}
+            graph_dict_file.parent.mkdir(parents=True,exist_ok=True)
+            with open(str(graph_dict_file), "wb") as f:
+                pickle.dump(graph_dict, f)
+            logger.info('Save graph dict to: {}'.format(graph_dict_file)) if logger is not None else None
+
+        #### Image Dir ####
+        self.img_dir = Path(self.config.IMG_DIR).resolve()
+        self.image_preprocess = image_transform(
+            self.config.vision_encoder.image_size,
+            is_train=False,
+            mean=None,
+            std=None
+        )
+
+        random.seed(self.seed)
+        # random.shuffle(self.data) if self.training else None
+
+        if logger is not None:
+            logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
+                self.__class__.__name__, len(self.data), self.split))
+
+    def load_instr_datasets(self,anno_file):
+        """
+         :return: example of self.data[0]
+            'scan': 'VLzqgDo317F'
+            'instr_id': '6250_0'
+            'path_id': 6250
+            'path': []
+            'heading':
+            'instruction':
+            'heading':
+            'distance':
+        """
+        assert anno_file.exists()
+        with open(str(anno_file)) as f:
+            data = json.load(f)
+        new_data = []
+        for i, item in enumerate(data):
+            # Split multiple instructions into separate entries
+            for j, instr in enumerate(item['instructions']):
+                new_item = dict(item)
+                new_item['instr_id'] = '%s_%d' % (item['path_id'], j)
+                new_item['instruction'] = instr
+                del new_item['instructions']
+                del new_item['instr_encodings']
+                new_data.append(new_item)
+        return new_data
+
+    def get_navigable_Locations(self):
+        """
+        :return:
+         exp: ['2t7WUuJeko7']['1e6b606b44df4a6086c0f97e826d4d15'] (current viewpoint Id)
+            {
+             '1e3a672fa1d24d668866455162e5b58a': (navigable adjacent viewpoint Id)
+             {
+               'heading': loc_heading,
+               'elevation': loc_elevation,
+               "normalized_heading": state.heading + loc.rel_heading,
+               "normalized_elevation": state.elevation + loc.rel_elevation,
+               'scanId': scan_id, # sets which scene is used, e.g. "2t7WUuJeko7"
+               'viewpointId': loc.viewpointId,  # sets the adjacent viewpoint location,
+               'pointId': ix, # 当前viewpoint的第ix-th个view指向loc.viewpointId [0-11]
+               'distance': distance,
+               'idx': j + 1, # adjacent index
+               'position': (loc.x, loc.y, loc.z),
+             }
+            }
+        """
+        mp3d_nav_file = Path(__file__).parent.parent.resolve() / self.config.MP3D_NAV
+        with open(str(mp3d_nav_file),"rb") as f:
+            res_dict = pickle.load(f)
+        return res_dict
+
+    def get_gt_trajs(self, data):
+        gt_trajs = {
+            x['instr_id']: (x['scan'], x['path']) \
+                for x in data if len(x['path']) > 1
+        }
+        return gt_trajs
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        item = self.data[index]
+        scan = item['scan']
+        viewpoint_ids = item['path']
+        heading = item['heading']
+        env = EnvBatch(
+            shortest_paths=self.shortest_paths[scan],
+            navigable_loc=self.navigable_loc[scan],
+            img_dir=self.img_dir,
+            batch_size=1
+        )
+        env.newEpisodes([scan],[viewpoint_ids[0]],[heading])
+        return {
+            'sample_idx': index,
+            'path_id': item['path_id'],
+            'instr_id': item['instr_id'],
+            'scan': scan,
+            'paths': viewpoint_ids,
+            'heading': heading,
+            'env': env,
+            'instruction': item['instruction']
+        }
+
+    @staticmethod
+    def collate_batch(batch_list, _unused=False):
+        data_dict = defaultdict(list)
+        for cur_sample in batch_list:
+            for key, val in cur_sample.items():
+                data_dict[key].append(val)
+        batch_size = len(batch_list)
+        ret = {}
+        for key, val in data_dict.items():
+            try:
+                if key in ['NotImplemented']:
+                    ret[key] = torch.stack(val, 0)
+                else:
+                    ret[key] = val
+            except:
+                print('Error in collate_batch: key=%s' % key)
+                raise TypeError
+
+        ret['batch_size'] = batch_size
+        return ret
+
+class DistributedSampler(_DistributedSampler):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True):
+        super().__init__(dataset, num_replicas=num_replicas, rank=rank)
+        self.shuffle = shuffle
+
+    def __iter__(self):
+        if self.shuffle:
+            g = torch.Generator()
+            g.manual_seed(self.epoch)
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = torch.arange(len(self.dataset)).tolist()
+
+        indices += indices[:(self.total_size - len(indices))]
+        assert len(indices) == self.total_size
+
+        indices = indices[self.rank:self.total_size:self.num_replicas]
+        assert len(indices) == self.num_samples
+
+        return iter(indices)
+
+
+def build_dataloader(dataset,batch_size,dist=False,training=True,workers=0,seed=None):
+    if dist:
+        if training:
+            sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        else:
+            rank, world_size = common_utils.get_dist_info()
+            sampler = DistributedSampler(dataset, world_size, rank, shuffle=False)
+    else:
+        sampler = None
+
+    shuffle = False # (sampler is None) and training
+
+    dataloader = DataLoader(
+        dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,
+        shuffle=shuffle, collate_fn=dataset.collate_batch,
+        drop_last=False, sampler=sampler, timeout=0, worker_init_fn=partial(common_utils.worker_init_fn, seed=seed)
+    )
+    dataloader.num_batches = len(dataloader)
+    return dataset, dataloader, sampler

@@ -20,6 +20,8 @@ def read_args():
     parser.add_argument('--img_feats', type=str, default="vit_imagenet", help='dataset configs')
     parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='object features')
 
+    parser.add_argument('--r2r_tok', type=str, default=False, help='tokenizer add special tokens')
+
     parser.add_argument('--split', type=str, default="train", help='train, val, test')
     parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
 
