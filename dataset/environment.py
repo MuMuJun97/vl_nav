@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import math
 import json
@@ -550,18 +551,18 @@ class R2RNavBatch(object):
 
 ############################### Dataset ###############################
 class R2RDataset(torch_data.Dataset):
-    def __init__(self, config, split='train', training=True, logger=None, batch_size=2, seed=0):
+    def __init__(self, config, args, training=True, logger=None):
         self.config = config
-        self.split = split
+        self.split = args.split
         self.logger = logger
-        self.batch_size = batch_size
+        self.batch_size = args.batch_size
         self.training = training
-        self.seed = seed
+        self.seed = args.seed
 
         #### R2R Data ####
         self.data_dir = Path(config.DATA_DIR).resolve()
         root_dir = Path(__file__).parent.parent.resolve()
-        anno_file = root_dir/config.R2R.DIR/config.R2R.SPLIT[split]
+        anno_file = root_dir/config.R2R.DIR/config.R2R.SPLIT[self.split]
 
         self.data = self.load_instr_datasets(anno_file=anno_file)
         self.scans = set([x['scan'] for x in self.data])
@@ -573,8 +574,10 @@ class R2RDataset(torch_data.Dataset):
         #### connectivity graph ####
         connectivity_dir = str(root_dir / 'data/connectivity')
         graph_dict_file = root_dir / 'build/R2R/R2R_{}_graph_dict.pkl'.format(self.split)
-        if graph_dict_file.exists():
-            with open(str(graph_dict_file),"rb") as f:
+        if args.rank != 0:
+            while not graph_dict_file.exists():
+                time.sleep(1)
+            with open(str(graph_dict_file), "rb") as f:
                 graph_dict = pickle.load(f)
                 logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
             self.graphs = graph_dict['graphs']
@@ -582,19 +585,28 @@ class R2RDataset(torch_data.Dataset):
             # self.shortest_distances = graph_dict['shortest_distances']
             del graph_dict
         else:
-            self.graphs = load_nav_graphs(connectivity_dir, self.scans)
-            self.shortest_paths = {}
-            for scan, G in self.graphs.items():  # compute all shortest paths
-                self.shortest_paths[scan] = dict(nx.all_pairs_dijkstra_path(G))
-            self.shortest_distances = {}
-            for scan, G in self.graphs.items():  # compute all shortest paths
-                self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
-            graph_dict = {'graphs': self.graphs, 'shortest_paths': self.shortest_paths,
-                          'shortest_distances': self.shortest_distances}
-            graph_dict_file.parent.mkdir(parents=True,exist_ok=True)
-            with open(str(graph_dict_file), "wb") as f:
-                pickle.dump(graph_dict, f)
-            logger.info('Save graph dict to: {}'.format(graph_dict_file)) if logger is not None else None
+            if graph_dict_file.exists():
+                with open(str(graph_dict_file),"rb") as f:
+                    graph_dict = pickle.load(f)
+                    logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
+                self.graphs = graph_dict['graphs']
+                self.shortest_paths = graph_dict['shortest_paths']
+                # self.shortest_distances = graph_dict['shortest_distances']
+                del graph_dict
+            else:
+                self.graphs = load_nav_graphs(connectivity_dir, self.scans)
+                self.shortest_paths = {}
+                for scan, G in self.graphs.items():  # compute all shortest paths
+                    self.shortest_paths[scan] = dict(nx.all_pairs_dijkstra_path(G))
+                self.shortest_distances = {}
+                for scan, G in self.graphs.items():  # compute all shortest paths
+                    self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
+                graph_dict = {'graphs': self.graphs, 'shortest_paths': self.shortest_paths,
+                              'shortest_distances': self.shortest_distances}
+                graph_dict_file.parent.mkdir(parents=True,exist_ok=True)
+                with open(str(graph_dict_file), "wb") as f:
+                    pickle.dump(graph_dict, f)
+                logger.info('Save graph dict to: {}'.format(graph_dict_file)) if logger is not None else None
 
         #### Image Dir ####
         self.img_dir = Path(self.config.IMG_DIR).resolve()

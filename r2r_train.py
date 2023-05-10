@@ -89,11 +89,9 @@ def main():
     ############# DATASET #############
     r2r_dataset = R2RDataset(
         config=global_cfg.Dataset,
-        split=args.split,
         training=False if args.split != 'train' else True,
         logger=logger,
-        batch_size=args.batch_size,
-        seed=args.seed
+        args=args,
     )
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
