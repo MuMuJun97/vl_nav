@@ -464,13 +464,13 @@ def train_one_epoch(
             tb_log.add_scalar('train/traj_loss', traj_loss.data.item(), global_step)
             tb_log.add_scalar('train/avg_step_loss', avg_step_loss.average, global_step)
 
-        pbar.update()
-        pbar.set_postfix(dict(
-            traj_loss=traj_loss.data.item(),
-            avg_step_loss=avg_step_loss.average,
-            step=global_step,
-            lr=cur_lr,
-        ))
+            pbar.update()
+            pbar.set_postfix(dict(
+                traj_loss=traj_loss.data.item(),
+                avg_step_loss=avg_step_loss.average,
+                step=global_step,
+                lr=cur_lr,
+            ))
 
         # Log loss to console
         if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
