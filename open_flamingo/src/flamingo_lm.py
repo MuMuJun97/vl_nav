@@ -82,7 +82,9 @@ class FlamingoLMMixin(nn.Module):
         self.set_history_state(None)
 
     def get_history_state(self):
-        return self.state
+        state = self.state.detach()
+        self.clear_history_state()
+        return state
 
     def init_flamingo(
         self,

@@ -59,7 +59,7 @@ def create_model_and_transforms(
     cross_attn_every_n_layers: int = 1,
     use_local_files: bool = False,
     decoder_layers_attr_name: str = None,
-    r2r_tok: bool = False,
+    args=None,
     **flamingo_kwargs,
 ):
     """
@@ -75,12 +75,13 @@ def create_model_and_transforms(
         cross_attn_every_n_layers (int, optional): determines how often to add a cross-attention layer. Defaults to 1.
         use_local_files (bool, optional): whether to use local files. Defaults to False.
         decoder_layers_attr_name (str, optional): name of the decoder layers attribute. Defaults to None.
-        r2r_tok (bool, optional): 是否添加新的tokens.
+        args:
     Returns:
         Flamingo: Flamingo model from pretrained vision and language encoders
         Image processor: Pipeline to preprocess input images
         Tokenizer: A tokenizer for the language model
     """
+    r2r_tok = args.r2r_tok # (bool, optional): 是否添加新的tokens.
     if 'model_config.pkl' in tokenizer_path:
         from pathlib import Path
         tokenizer_path = Path(tokenizer_path).parent.resolve().__str__()
@@ -152,6 +153,7 @@ def create_model_and_transforms(
         cross_attn_every_n_layers=cross_attn_every_n_layers,
         history_vision=r2r_tok,
         state_token_id=text_tokenizer.encode("<state>")[-1],
+        multi_state=args.multi_state,
         **flamingo_kwargs,
     )
 

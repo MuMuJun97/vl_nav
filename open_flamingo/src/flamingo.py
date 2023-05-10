@@ -19,6 +19,7 @@ class Flamingo(nn.Module):
         view_nums: int = 12,
         history_vision: bool = False,
         state_token_id: int = 1,
+        multi_state: bool = False,
     ):
         """
         Args:
@@ -61,11 +62,18 @@ class Flamingo(nn.Module):
 
         self.have_state = False
         self.history_vision = history_vision
+        self.multi_state = multi_state
         if history_vision:
-            self.history_encoder = nn.Sequential(
-                nn.Linear(self.lang_encoder.config.hidden_size, self.lang_encoder.config.hidden_size),
-                nn.LayerNorm(self.lang_encoder.config.hidden_size)
-            )
+            if multi_state:
+                self.history_encoder = nn.Sequential(
+                    nn.Linear(self.lang_encoder.config.hidden_size, self.lang_encoder.config.hidden_size),
+                    nn.LayerNorm(self.lang_encoder.config.hidden_size)
+                )
+            else:
+                self.history_encoder = nn.Sequential(
+                    nn.Linear(self.lang_encoder.config.hidden_size*2, self.lang_encoder.config.hidden_size),
+                    nn.LayerNorm(self.lang_encoder.config.hidden_size)
+                )
 
 
     def forward_train(
@@ -105,7 +113,10 @@ class Flamingo(nn.Module):
             history_vis: vision images - history state
         """
         if history_vis != -1:
-            self.encode_vision_x_with_state(vision_x=vision_x,history_vis=history_vis)
+            self.encode_vision_x_with_state(
+                vision_x=vision_x,
+                history_vis=history_vis,
+            )
         else:
             if use_local_vision == 'feature':
                 self._encode_vision_with_local(vision_x)
@@ -359,20 +370,24 @@ class Flamingo(nn.Module):
 
         if not self.have_state:
             self.have_state = True
-            vision_state = self.history_encoder(
-                view_vision_x.mean(dim=-2).unsqueeze(1)
-            )
-            self.lang_encoder.set_history_state(vision_state) # [B,Dim]
+            if self.multi_state:
+                vision_state = self.history_encoder(
+                    view_vision_x.mean(dim=-2).unsqueeze(1)
+                )
+                self.lang_encoder.set_history_state(vision_state)
+            else:
+                self.lang_encoder.set_history_state(view_vision_x.mean(dim=-2))
         else:
             history_vision = self.lang_encoder.get_history_state()
-            vision_state = self.history_encoder(
-                view_vision_x.mean(dim=-2).unsqueeze(1)
-            )
-            # vision_state = torch.cat([view_vision_x.mean(dim=-2),history_vision],dim=-1)
-            # vision_state = self.history_encoder(vision_state)
-            vision_state = torch.cat([vision_state,history_vision],dim=1)
+            if self.multi_state:
+                vision_state = self.history_encoder(
+                    view_vision_x.mean(dim=-2).unsqueeze(1)
+                )
+                vision_state = torch.cat([vision_state,history_vision],dim=1)
+            else:
+                vision_state = torch.cat([view_vision_x.mean(dim=-2), history_vision], dim=-1)
+                vision_state = self.history_encoder(vision_state)
             self.lang_encoder.set_history_state(vision_state)
-
 
     def prepare_inputs_for_generation(
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs

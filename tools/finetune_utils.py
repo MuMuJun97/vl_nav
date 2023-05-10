@@ -154,9 +154,11 @@ def process_text(
         else:
             raise NotImplementedError
 
-        history_state = "".join(["{}<state>".format(_) for _ in range(t+1)])
-        state = "#The visited environment state is {}.".format(history_state)
-        # state = "#The visited environment state is {}.".format('<state>')
+        if args.multi_state:
+            history_state = "".join(["{}<state>".format(_) for _ in range(t+1)])
+            state = "#The visited environment state is {}.".format(history_state)
+        else:
+            state = "#The visited environment state is {}.".format('<state>')
         input_text = prompt.format(
             task_description=task_description,
             instruction=instr,
@@ -379,6 +381,7 @@ def train_one_epoch(
 
         ########## Navigation Process ##########
         traj_loss = 0.
+        avg_step_loss = Metrics()
         for t in range(agent_config.max_action_len):
             input_imgs = process_image(
                 [ob['panoramic_img'] for ob in obs],
@@ -409,6 +412,14 @@ def train_one_epoch(
                 loss = outputs[0]
                 logits = outputs[1]
             traj_loss += loss
+            if not args.single_step_loss:
+                ######### Loss #########
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+            avg_step_loss.accumulate(loss.data.item())
 
             ######### Make Action #########
             actions = parse_predictions_to_actions(
@@ -432,13 +443,17 @@ def train_one_epoch(
             if ended.all():
                 break
 
-        ######### Loss #########
-        traj_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
-        loss_metric.accumulate(traj_loss.data.item())
+        if args.single_step_loss:
+            ######### Loss #########
+            traj_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+            loss_metric.accumulate(traj_loss.data.item())
+        else:
+            loss_metric.accumulate(traj_loss.data.item())
+
         if tb_log is not None:
             try:
                 cur_lr = float(optimizer.lr)
@@ -446,11 +461,13 @@ def train_one_epoch(
                 cur_lr = optimizer.param_groups[0]['lr']
 
             tb_log.add_scalar('meta_data/learning_rate', cur_lr, global_step)
-            tb_log.add_scalar('train/loss', traj_loss.data.item(), global_step)
+            tb_log.add_scalar('train/traj_loss', traj_loss.data.item(), global_step)
+            tb_log.add_scalar('train/avg_step_loss', avg_step_loss.average, global_step)
 
         pbar.update()
         pbar.set_postfix(dict(
-            loss=traj_loss.data.item(),
+            traj_loss=traj_loss.data.item(),
+            avg_step_loss=avg_step_loss.average,
             step=global_step,
             lr=cur_lr,
         ))

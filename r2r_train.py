@@ -25,7 +25,6 @@ from tools.finetune_utils import (
     train_one_epoch
 )
 import datetime
-from dataset.preprocess_data import promptQAs
 
 
 def main():
@@ -65,7 +64,7 @@ def main():
         use_local_files=args.offline, # False
         use_media_placement_augmentation=args.use_media_placement_augmentation, # True
         unfreeze_llm=args.unfreeze_llm, # unfreeze language model
-        r2r_tok=args.r2r_tok,
+        args=args,
     )
 
     ################### Word Tokens ###################
