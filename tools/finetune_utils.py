@@ -38,10 +38,12 @@ def get_new_obs(batch_dict):
             'instr_id': batch_dict['instr_id'][bs],
             'instruction': batch_dict['instruction'][bs],
             'gt_path': batch_dict['paths'][bs],
-            'path_id': batch_dict['path_id'][bs]
+            'path_id': batch_dict['path_id'][bs],
+            'sample_idx': batch_dict['sample_idx'][bs]
         })
         batch_obs.append(ob)
     return batch_obs
+
 
 def reset_env(batch_dict):
     batch_env = batch_dict['env']
@@ -56,7 +58,8 @@ def reset_env(batch_dict):
             'instr_id': batch_dict['instr_id'][bs],
             'instruction': batch_dict['instruction'][bs],
             'gt_path': batch_dict['paths'][bs],
-            'path_id': batch_dict['path_id'][bs]
+            'path_id': batch_dict['path_id'][bs],
+            'sample_idx': batch_dict['sample_idx'][bs]
         })
         batch_obs.append(ob)
 
@@ -454,7 +457,7 @@ def train_one_epoch(
         else:
             loss_metric.accumulate(traj_loss.data.item())
 
-        if tb_log is not None:
+        if tb_log is not None and args.rank == 0:
             try:
                 cur_lr = float(optimizer.lr)
             except:

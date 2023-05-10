@@ -251,32 +251,44 @@ class EnvBatch(object):
         states = self.getStates()
         for i, (panoramic_img,state) in enumerate(states):
 
+            # the agent may be located at other viewpoints and not on the gt trajectory
+            # first: compute the next viewpoint
+            teacher = self.shortest_path_action(state, target_vp, gt_path)
+
             candidate = copy.deepcopy(self.navigable_loc[state.location.viewpointId])
             candidate.pop(state.location.viewpointId) # remove self-viewpoint
-            new_candidate = copy.deepcopy(candidate)
+            new_candidate = dict() # copy.deepcopy(candidate)
             view_id_candidate = dict()
             candidate_view_id = dict()
+
             for k,v in candidate.items():
                 if view_id_candidate.get(v['pointId'],None) is None:
                     view_id_candidate[v['pointId']] = k
                     candidate_view_id[k] = v['pointId']
+                    new_candidate[k] = candidate[k]
                 else:
                     prev_vp = view_id_candidate[v['pointId']]
-                    if k in gt_path:
+                    if prev_vp == teacher:
+                        continue
+                    elif k == teacher:
+                        # remove previous viewpoint
                         view_id_candidate.pop(v['pointId'])
                         candidate_view_id.pop(prev_vp)
                         new_candidate.pop(prev_vp)
-
+                        # add current new viewpoint
                         view_id_candidate[v['pointId']] = k
                         candidate_view_id[k] = v['pointId']
+                        new_candidate[k] = candidate[k]
                     else:
-                        if v['distance'] < candidate[prev_vp]['distance'] and prev_vp not in gt_path:
+                        # prev_vp and cur_vp are not GT-Label
+                        if v['distance'] < candidate[prev_vp]['distance']:
                             view_id_candidate.pop(v['pointId'])
                             candidate_view_id.pop(prev_vp)
                             new_candidate.pop(prev_vp)
 
                             view_id_candidate[v['pointId']] = k
                             candidate_view_id[k] = v['pointId']
+                            new_candidate[k] = candidate[k]
             del candidate
             ob = {
                 'scan' : state.scanId,
@@ -286,7 +298,7 @@ class EnvBatch(object):
                 'heading' : state.heading,
                 'elevation' : state.elevation,
                 'candidate': new_candidate,
-                'teacher' : self.shortest_path_action(state, target_vp, gt_path),
+                'teacher' : teacher, # self.shortest_path_action(state, target_vp, gt_path),
                 'candidate_view_id': candidate_view_id,
                 'view_id_candidate': view_id_candidate,
                 'panoramic_img': panoramic_img,
