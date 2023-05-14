@@ -12,7 +12,7 @@ class Flamingo(nn.Module):
         vision_encoder: nn.Module,
         lang_encoder: nn.Module,
         eoc_token_id: int,
-        media_token_id: int,
+        media_token_id,
         vis_dim: int,
         cross_attn_every_n_layers: int = 1,
         use_media_placement_augmentation: bool = False,
@@ -38,7 +38,7 @@ class Flamingo(nn.Module):
         self.use_media_placement_augmentation = use_media_placement_augmentation
         self.vis_dim = vis_dim
         self.vision_encoder = vision_encoder
-        self.perceiver = PerceiverResampler(dim=self.vis_dim)
+        # self.perceiver = PerceiverResampler(dim=self.vis_dim)
 
         self.lang_encoder = lang_encoder
 
@@ -56,24 +56,25 @@ class Flamingo(nn.Module):
             nn.Linear(self.vis_dim, self.lang_encoder.config.hidden_size),
             nn.LayerNorm(self.lang_encoder.config.hidden_size)
         )
-        # @param: img views
-        self.view_nums = view_nums
-        self.img_id_embedding = nn.Embedding(view_nums, self.lang_encoder.config.hidden_size)
 
-        self.have_state = False
-        self.history_vision = history_vision
-        self.multi_state = multi_state
-        if history_vision:
-            if multi_state:
-                self.history_encoder = nn.Sequential(
-                    nn.Linear(self.lang_encoder.config.hidden_size, self.lang_encoder.config.hidden_size),
-                    nn.LayerNorm(self.lang_encoder.config.hidden_size)
-                )
-            else:
-                self.history_encoder = nn.Sequential(
-                    nn.Linear(self.lang_encoder.config.hidden_size*2, self.lang_encoder.config.hidden_size),
-                    nn.LayerNorm(self.lang_encoder.config.hidden_size)
-                )
+        # # @param: img views
+        # self.view_nums = view_nums
+        # self.img_id_embedding = nn.Embedding(view_nums, self.lang_encoder.config.hidden_size)
+        #
+        # self.have_state = False
+        # self.history_vision = history_vision
+        # self.multi_state = multi_state
+        # if history_vision:
+        #     if multi_state:
+        #         self.history_encoder = nn.Sequential(
+        #             nn.Linear(self.lang_encoder.config.hidden_size, self.lang_encoder.config.hidden_size),
+        #             nn.LayerNorm(self.lang_encoder.config.hidden_size)
+        #         )
+        #     else:
+        #         self.history_encoder = nn.Sequential(
+        #             nn.Linear(self.lang_encoder.config.hidden_size*2, self.lang_encoder.config.hidden_size),
+        #             nn.LayerNorm(self.lang_encoder.config.hidden_size)
+        #         )
 
 
     def forward_train(
@@ -123,23 +124,29 @@ class Flamingo(nn.Module):
             elif use_local_vision == 'image':
                 self._encode_multi_view_image(vision_x)
             else:
-                assert (
-                               vision_x is not None
-                       ) or use_cached_vision_x, (
-                    "Must provide either vision_x or use_cached_vision_x to True."
-                )
-
-                if use_cached_vision_x:
-                    # Case: use cached; vision_x should be cached and other
-                    # vision-related inputs should not be provided.
-                    assert (
-                            vision_x is None
-                    ), "Expect vision_x to be None when use_cached_vision_x is True."
-                    assert self.lang_encoder.is_conditioned()
-
+                # multi-step dialog: vision + mask
+                if isinstance(vision_x, tuple):
+                    self.encode_image_with_mask(vision_x)
                 else:
-                    # Case: do not use caching (i.e. this is a standard forward pass);
                     self._encode_vision_x(vision_x=vision_x)
+                # assert (
+                #                vision_x is not None
+                #        ) or use_cached_vision_x, (
+                #     "Must provide either vision_x or use_cached_vision_x to True."
+                # )
+                #
+                # if use_cached_vision_x:
+                #     # Case: use cached; vision_x should be cached and other
+                #     # vision-related inputs should not be provided.
+                #     assert (
+                #             vision_x is None
+                #     ), "Expect vision_x to be None when use_cached_vision_x is True."
+                #     assert self.lang_encoder.is_conditioned()
+                #
+                # else:
+                #
+                #     # Case: do not use caching (i.e. this is a standard forward pass);
+                #     self._encode_vision_x(vision_x=vision_x)
 
         output = self.lang_encoder(
             input_ids=lang_x,
@@ -168,7 +175,7 @@ class Flamingo(nn.Module):
         use_local_vision: str = 'none',
         mode: str = 'train',
         max_length: int = 20,
-        history_vis: bool = False,
+        history_vis: int = -1,
     ):
         if mode == 'train':
             return self.forward_train(
@@ -515,3 +522,35 @@ class Flamingo(nn.Module):
         self.lang_encoder.clear_conditioned_layers()
 
         return input_ids
+
+    def encode_image_with_mask(self, vision_x):
+        """
+        Args:
+            vision_x: tuple (vision_x, image_mask)
+
+        Returns:
+
+        """
+        image_mask = vision_x[1]
+        vision_x = vision_x[0]
+
+        assert vision_x.ndim == 6, "vision_x should be of shape (b, T_img, F, C, H, W)"
+        b, T, F = vision_x.shape[:3]
+        assert F == 1, "Only single frame supported"
+
+        vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
+        with torch.no_grad():
+            vision_x = self.vision_encoder.visual(vision_x)[1]
+        vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
+
+        # vision_x = self.perceiver(vision_x)  # reshapes to (b, T, n, d)
+        # vision_x = self.mapper(vision_x.mean(dim=-2))
+        vision_x = self.mapper(vision_x.mean(dim=-2))
+        vision_x = vision_x.squeeze(dim=-2)
+
+        # view embedding
+        # view_id_tensor = torch.arange(vision_x.shape[1], device=vision_x.device).repeat((vision_x.shape[0], 1))
+        # view_id_embeds = self.img_id_embedding(view_id_tensor)
+        # view_vision_x = vision_x + view_id_embeds
+
+        self.lang_encoder.condition_vis_x(vision_x, image_mask)

@@ -28,6 +28,7 @@ def read_args():
     parser.add_argument('--obj_feats', type=str, default="butd_SOON", help='object features')
 
     parser.add_argument('--split', type=str, default="train", help='train, val, test')
+    parser.add_argument('--shuffle', type=bool, default=True, help='True: shuffle all_data [soon, r2r, cvdn, ...]')
     parser.add_argument('--output_dir', type=str, default=str(output_dir), help='output dir')
 
     ############# TRAINING #############
@@ -77,7 +78,7 @@ def read_args():
     )
     parser.add_argument("--use_media_placement_augmentation", type=bool, default=True)
     parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--num_epochs", type=int, default=40)
+    parser.add_argument("--num_epochs", type=int, default=4)
     parser.add_argument(
         "--logging_steps", type=int, default=1000, help="log loss every n steps"
     )

@@ -27,6 +27,18 @@ from tools.finetune_utils import (
 import datetime
 
 
+def get_tokenizer_token_ids(tokenizer):
+    image_tokens = ['<image{}>'.format(x) for x in range(12)]
+    action_tokens = ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
+    image_token_ids = tokenizer.encode(
+        "".join(image_tokens),add_special_tokens=False
+    )
+    action_token_ids = tokenizer.encode(
+        "".join(action_tokens),add_special_tokens=False
+    )
+    return image_token_ids, action_token_ids
+
+
 def main():
     args = read_args()
     args.r2r_tok = True # add new special tokens to tokenizer.
@@ -70,18 +82,10 @@ def main():
     ################### Word Tokens ###################
     # <PAD> on the left
     tokenizer.padding_side = "left"
-    media_token_id = tokenizer("<image>", add_special_tokens=False)["input_ids"][-1]
-    endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
+    args.image_token_ids, args.action_token_ids = get_tokenizer_token_ids(tokenizer)
+    args.endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
         "input_ids"
     ][-1]
-    ### "<image> .Question:"
-    question_token_id = tokenizer("#Question", add_special_tokens=False)["input_ids"][-1]
-    answer_token_id = tokenizer("#Answer", add_special_tokens=False)["input_ids"][-1]
-
-    args.media_token_id = media_token_id
-    args.endofchunk_token_id = endofchunk_token_id
-    args.question_token_id = question_token_id
-    args.answer_token_id = answer_token_id
 
     logger.info("**************************** Train ****************************")
 
@@ -91,14 +95,13 @@ def main():
         training=False if args.split != 'train' else True,
         logger=logger,
         args=args,
+        image_processor=image_processor,
+        tokenizer=tokenizer,
     )
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
+        args=args,
         dataset=r2r_dataset,
-        batch_size=args.batch_size,
-        dist=args.distributed,
-        workers=args.workers,
-        training=False if args.split != 'train' else True
     )
 
     ############# Init #############

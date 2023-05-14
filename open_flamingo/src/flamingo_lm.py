@@ -1,5 +1,5 @@
 import random
-
+from typing import List
 import torch.nn as nn
 
 from .helpers import GatedCrossAttentionBlock
@@ -71,9 +71,9 @@ class FlamingoLMMixin(nn.Module):
     def _set_decoder_layers(self, value):
         setattr_recursive(self, self.decoder_layers_attr_name, value)
 
-    def condition_vis_x(self, vis_x, has_state=False):
+    def condition_vis_x(self, vis_x, image_mask=None):
         self.vis_x = vis_x
-        self.has_state = has_state
+        self.image_mask = image_mask
 
     def set_history_state(self, state):
         self.state = state
@@ -133,17 +133,29 @@ class FlamingoLMMixin(nn.Module):
 
         if kwargs["past_key_values"] is None:
             input_ids = kwargs["input_ids"] if "input_ids" in kwargs else input[0]
-            media_locations = input_ids == self.media_token_id
-            inputs_embeds = self.model.embed_tokens(input_ids)
-            media_shape = inputs_embeds[media_locations].shape
-            inputs_embeds[media_locations] += self.vis_x.reshape(media_shape)
 
-            if self.has_state:
-                # history vision
-                state_locations = input_ids == self.state_token_id
-                state_shape = inputs_embeds[state_locations].shape
-                if state_shape[0] != 0:
-                    inputs_embeds[state_locations] += self.state.reshape(state_shape)
+            if isinstance(self.media_token_id, int):
+                media_locations = input_ids == self.media_token_id
+                inputs_embeds = self.model.embed_tokens(input_ids)
+                media_shape = inputs_embeds[media_locations].shape
+                inputs_embeds[media_locations] += self.vis_x.reshape(media_shape)
+            elif isinstance(self.media_token_id, list):
+                media_locations = (input_ids >= self.media_token_id[0]) & \
+                                  (input_ids <= self.media_token_id[-1])
+                inputs_embeds = self.model.embed_tokens(input_ids)
+                media_shape = inputs_embeds[media_locations].shape
+                if self.image_mask is not None:
+                    # image_mask = self.image_mask.repeat(1, 12)
+                    inputs_embeds[media_locations] += self.vis_x[self.image_mask].reshape(media_shape)
+                else:
+                    inputs_embeds[media_locations] += self.vis_x.reshape(media_shape)
+
+            # if self.has_state:
+            #     # history vision
+            #     state_locations = input_ids == self.state_token_id
+            #     state_shape = inputs_embeds[state_locations].shape
+            #     if state_shape[0] != 0:
+            #         inputs_embeds[state_locations] += self.state.reshape(state_shape)
 
             kwargs["input_ids"] = None
             kwargs["inputs_embeds"] = inputs_embeds

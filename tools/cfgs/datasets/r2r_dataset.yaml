@@ -5,8 +5,8 @@ Dataset:
   # navigableLocations
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
-  # Specify the dataset name to use
-  SOURCE: ['SOON','FR2R']
+  # Specify the dataset name to useR2R
+  SOURCE: ['R2R', 'CVDN', 'SOON', 'REVERIE'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN"
   SOON:
     DIR: "data/SOON/annotations/iccv21_new_released" # train.json
     SPLIT: {
@@ -32,6 +32,27 @@ Dataset:
       "val_seen": "R2R_val_seen_enc.json",
       "val_unseen": "R2R_val_unseen_enc.json",
       "test": "R2R_test_enc.json"
+    }
+
+  REVERIE:
+    DIR: "data/REVERIE"
+    SPLIT: {
+      "train": "REVERIE_train.json",
+      "val_seen": "REVERIE_val_seen.json",
+      "val_unseen": "REVERIE_val_unseen.json",
+      "test": "REVERIE_test.json"
+    }
+
+  EQA:
+    DIR: "data/mp3d/mp3d_eqa_dict.json"
+
+  CVDN:
+    DIR: "data/CVDN"
+    SPLIT: {
+      "train": "train.json",
+      "val_seen": "val_seen.json",
+      "val_unseen": "val_unseen.json",
+      "test": "test_cleaned.json"
     }
 
   Img_Features_File_Map: {
@@ -61,7 +82,7 @@ Dataset:
   # tokenizer.eos_token
   tokenizer:
     eos_token: '</s>'
-    max_length: 320
+    max_length: 512
     prompt:
       type: "flamingo"
       task_type: "short"

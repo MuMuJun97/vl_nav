@@ -367,7 +367,7 @@ def add_id_on_img(img, txt_id):
     )
     return img
 
-def show_12_images(images,view_id=0):
+def show_12_images(images,view_id=-1):
     vrgb = []
     for i in range(len(images)):
         st_idx = 60
@@ -378,6 +378,6 @@ def show_12_images(images,view_id=0):
         if i == view_id:
             id_img = add_token_on_img(id_img, token=str(i), color=(0, 0, 255), height=int(id_img.shape[0] / 3 * 2))
         vrgb.append(id_img)
-    vrgb = vrgb[6:] + vrgb[:6]
+    # vrgb = vrgb[6:] + vrgb[:6]
     vrgb = np.concatenate(vrgb, axis=1).astype(np.uint8)
     return vrgb

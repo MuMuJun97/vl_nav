@@ -50,6 +50,7 @@ def llama_model_in_debug_model(lang_encoder_path):
             print(e)
     return model
 
+
 def create_model_and_transforms(
     clip_vision_encoder_path: str,
     clip_vision_encoder_pretrained: str,
@@ -103,11 +104,12 @@ def create_model_and_transforms(
     if r2r_tok:
         # add <walkto0-11>
         action_tokens = ["<|endofchunk|>", "<image>"] \
-                        + ['<walkto{}>'.format(_) for _ in range(12)] \
-                        + ['<stop>','<Done>','<state>'] \
-                        + ['<image{}>'.format(x) for x in range(12)]
+                        + ['<image{}>'.format(x) for x in range(12)] \
+                        + ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
+        media_token_id = None
     else:
         action_tokens = ["<|endofchunk|>", "<image>", "<state>"]
+        media_token_id = text_tokenizer.encode("<image>")[-1]
 
     text_tokenizer.add_special_tokens(
         {"additional_special_tokens": action_tokens}
@@ -141,12 +143,18 @@ def create_model_and_transforms(
     lang_encoder = lang_encoder.bfloat16()
     # TODO ? endofchunk: how to modify?
     # cross_attn_every_n_layers: multi-modal cross fusion layer.
+
+    if r2r_tok:
+        image_tokens = ['<image{}>'.format(x) for x in range(12)]
+        media_token_id = text_tokenizer.encode(
+            "".join(image_tokens), add_special_tokens=False
+        )
+
     model = Flamingo(
         vision_encoder,
         lang_encoder,
-        # text_tokenizer.encode("</s>")[-1],
         text_tokenizer.encode("<|endofchunk|>")[-1],
-        text_tokenizer.encode("<image>")[-1],
+        media_token_id=media_token_id,
         vis_dim=open_clip.get_model_config(clip_vision_encoder_path)["vision_cfg"][
             "width"
         ],
@@ -163,13 +171,13 @@ def create_model_and_transforms(
 
     # # Unfreeze perceiver, gated_cross_attn_layers, and LM input embeddings
 
-    model.img_id_embedding.requires_grad_(True)
-    model.perceiver.requires_grad_(True)
+    # model.img_id_embedding.requires_grad_(True)
+    # model.perceiver.requires_grad_(True)
     model.mapper.requires_grad_(True)
     model.lang_encoder.requires_grad_(True)
 
-    if r2r_tok:
-        model.history_encoder.requires_grad_(True)
+    # if r2r_tok:
+    #     model.history_encoder.requires_grad_(True)
 
     # model.lang_encoder.gated_cross_attn_layers.requires_grad_(True)
     model.lang_encoder.get_input_embeddings().requires_grad_(True)

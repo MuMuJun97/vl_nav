@@ -2,11 +2,13 @@ import time
 import numpy as np
 import math
 import json
+import torchvision
 from open_clip.transform import image_transform
 import torch.utils.data as torch_data
 from pathlib import Path
 import random
 import os
+from PIL import Image
 import networkx as nx
 import cv2
 import copy
@@ -17,6 +19,13 @@ from tools.train import common_utils
 from torch.utils.data import DataLoader
 from functools import partial
 from collections import defaultdict
+from dataset.process_multi_data import (
+    load_r2r_data,load_soon_data,
+    load_fr2r_data,load_reverie_data,
+    generate_data_indexs,
+    generate_graphs,load_nav_graphs,
+    load_eqa_data, load_cvdn_data
+)
 
 def new_simulator(connectivity_dir):
     try:
@@ -40,34 +49,6 @@ def new_simulator(connectivity_dir):
     sim.initialize()
 
     return sim
-
-def load_nav_graphs(connectivity_dir, scans):
-    ''' Load connectivity graph for each scan '''
-
-    def distance(pose1, pose2):
-        ''' Euclidean distance between two graph poses '''
-        return ((pose1['pose'][3]-pose2['pose'][3])**2\
-          + (pose1['pose'][7]-pose2['pose'][7])**2\
-          + (pose1['pose'][11]-pose2['pose'][11])**2)**0.5
-
-    graphs = {}
-    for scan in scans:
-        with open(os.path.join(connectivity_dir, '%s_connectivity.json' % scan)) as f:
-            G = nx.Graph()
-            positions = {}
-            data = json.load(f)
-            for i,item in enumerate(data):
-                if item['included']:
-                    for j,conn in enumerate(item['unobstructed']):
-                        if conn and data[j]['included']:
-                            positions[item['image_id']] = np.array([item['pose'][3],
-                                    item['pose'][7], item['pose'][11]]);
-                            assert data[j]['unobstructed'][i], 'Graph should be undirected'
-                            G.add_edge(item['image_id'],data[j]['image_id'],weight=distance(item,data[j]))
-            nx.set_node_attributes(G, values=positions, name='position')
-            graphs[scan] = G
-    return graphs
-
 
 class ViewPoint(object):
     def __init__(
@@ -563,7 +544,7 @@ class R2RNavBatch(object):
 
 ############################### Dataset ###############################
 class R2RDataset(torch_data.Dataset):
-    def __init__(self, config, args, training=True, logger=None):
+    def __init__(self, config, args, training=True, logger=None, image_processor=None, tokenizer=None):
         self.config = config
         self.split = args.split
         self.logger = logger
@@ -571,56 +552,70 @@ class R2RDataset(torch_data.Dataset):
         self.training = training
         self.seed = args.seed
 
-        #### R2R Data ####
-        self.data_dir = Path(config.DATA_DIR).resolve()
-        root_dir = Path(__file__).parent.parent.resolve()
-        anno_file = root_dir/config.R2R.DIR/config.R2R.SPLIT[self.split]
+        _root_dir = Path(__file__).parent.parent.resolve()
 
-        self.data = self.load_instr_datasets(anno_file=anno_file)
-        self.scans = set([x['scan'] for x in self.data])
-        self.gt_trajs = self.get_gt_trajs(self.data)  # for evaluation
+        # connectivity graph
+        connectivity_dir = str(_root_dir / 'data/connectivity')
+        graph_dict_file = _root_dir / 'build/R2R/R2R_{}_graph_dict.pkl'.format(self.split)
+        with open(str(_root_dir/"data/connectivity/scans.txt")) as f:
+            mp3d_scans = f.readlines()
+        mp3d_scans = [s.strip() for s in mp3d_scans]
 
-        #### MP3D Connectivity Graph ####
+        _, self.shortest_paths = generate_graphs(
+            graph_dict_file=graph_dict_file,
+            rank=args.rank,
+            logger=logger,
+            connectivity_dir=connectivity_dir,
+            scans=mp3d_scans,
+        )
+
+        # multiple dataset
+        self.data = dict()
+        self.alldata = []
+        self.all_index = dict()
+        msg = ''
+        for source in config.SOURCE:
+            if source == 'R2R':
+                _anno_file = _root_dir/config.R2R.DIR/config.R2R.SPLIT[self.split]
+                self.data['r2r'] = load_r2r_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} R2R samples'.format(len(self.data['r2r']))
+            elif source == 'REVERIE':
+                _anno_file = _root_dir/config.REVERIE.DIR/config.REVERIE.SPLIT[self.split]
+                self.data['reverie'] = load_reverie_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} REVERIE samples'.format(len(self.data['reverie']))
+            elif source == 'SOON':
+                _anno_file = _root_dir/config.SOON.DIR/config.SOON.SPLIT[self.split]
+                self.data['soon'] = load_soon_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} SOON samples'.format(len(self.data['soon']))
+            elif source == "FR2R":
+                _anno_file = _root_dir/config.FR2R.DIR/config.FR2R.SPLIT[self.split]
+                self.data['fr2r'] = load_fr2r_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} Fine-grained R2R samples'.format(len(self.data['fr2r']))
+            elif source == "EQA":
+                _anno_file = _root_dir/config.EQA.DIR
+                eqa_split = 'train'
+                if 'val' in self.split:
+                    eqa_split = 'val'
+                self.data['eqa'] = load_eqa_data(anno_file=_anno_file,split=eqa_split)
+                msg += '\n- Dataset: load {} Embodied QA samples'.format(len(self.data['eqa']))
+            elif source == "CVDN":
+                _anno_file = _root_dir/config.CVDN.DIR/config.CVDN.SPLIT[self.split]
+                self.data['cvdn'] = load_cvdn_data(anno_file=_anno_file, shortest_paths=self.shortest_paths)
+                msg += '\n- Dataset: load {} CVDN samples'.format(len(self.data['cvdn']))
+            else:
+                NotImplementedError
+
+        self.alldata, self.all_index = generate_data_indexs(data=self.data)
+        msg += '\n- Dataset: load {} split: {} samples in total'.format(self.split, len(self.alldata))
+        del self.data
+
+        self.scans = set([x['scan'] for x in self.alldata])
+        msg += '\n- Dataset: load {} split: {} scans in total'.format(self.split, len(self.scans))
+
+        # MP3D Connectivity Graph
         self.navigable_loc = self.get_navigable_Locations()
 
-        #### connectivity graph ####
-        connectivity_dir = str(root_dir / 'data/connectivity')
-        graph_dict_file = root_dir / 'build/R2R/R2R_{}_graph_dict.pkl'.format(self.split)
-        if args.rank != 0:
-            while not graph_dict_file.exists():
-                time.sleep(1)
-            with open(str(graph_dict_file), "rb") as f:
-                graph_dict = pickle.load(f)
-                logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
-            self.graphs = graph_dict['graphs']
-            self.shortest_paths = graph_dict['shortest_paths']
-            # self.shortest_distances = graph_dict['shortest_distances']
-            del graph_dict
-        else:
-            if graph_dict_file.exists():
-                with open(str(graph_dict_file),"rb") as f:
-                    graph_dict = pickle.load(f)
-                    logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
-                self.graphs = graph_dict['graphs']
-                self.shortest_paths = graph_dict['shortest_paths']
-                # self.shortest_distances = graph_dict['shortest_distances']
-                del graph_dict
-            else:
-                self.graphs = load_nav_graphs(connectivity_dir, self.scans)
-                self.shortest_paths = {}
-                for scan, G in self.graphs.items():  # compute all shortest paths
-                    self.shortest_paths[scan] = dict(nx.all_pairs_dijkstra_path(G))
-                self.shortest_distances = {}
-                for scan, G in self.graphs.items():  # compute all shortest paths
-                    self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
-                graph_dict = {'graphs': self.graphs, 'shortest_paths': self.shortest_paths,
-                              'shortest_distances': self.shortest_distances}
-                graph_dict_file.parent.mkdir(parents=True,exist_ok=True)
-                with open(str(graph_dict_file), "wb") as f:
-                    pickle.dump(graph_dict, f)
-                logger.info('Save graph dict to: {}'.format(graph_dict_file)) if logger is not None else None
-
-        #### Image Dir ####
+        # Image Dir
         self.img_dir = Path(self.config.IMG_DIR).resolve()
         self.image_preprocess = image_transform(
             self.config.vision_encoder.image_size,
@@ -629,39 +624,17 @@ class R2RDataset(torch_data.Dataset):
             std=None
         )
 
-        random.seed(self.seed)
-        # random.shuffle(self.data) if self.training else None
+        if args.shuffle:
+            random.seed(self.seed)
+            random.shuffle(self.alldata) if self.training else None
+
+        self.tokenizer = tokenizer
+        self.image_processor = image_processor
 
         if logger is not None:
             logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
-                self.__class__.__name__, len(self.data), self.split))
-
-    def load_instr_datasets(self,anno_file):
-        """
-         :return: example of self.data[0]
-            'scan': 'VLzqgDo317F'
-            'instr_id': '6250_0'
-            'path_id': 6250
-            'path': []
-            'heading':
-            'instruction':
-            'heading':
-            'distance':
-        """
-        assert anno_file.exists()
-        with open(str(anno_file)) as f:
-            data = json.load(f)
-        new_data = []
-        for i, item in enumerate(data):
-            # Split multiple instructions into separate entries
-            for j, instr in enumerate(item['instructions']):
-                new_item = dict(item)
-                new_item['instr_id'] = '%s_%d' % (item['path_id'], j)
-                new_item['instruction'] = instr
-                del new_item['instructions']
-                del new_item['instr_encodings']
-                new_data.append(new_item)
-        return new_data
+                self.__class__.__name__, len(self.alldata), self.split))
+            logger.info(msg)
 
     def get_navigable_Locations(self):
         """
@@ -696,30 +669,176 @@ class R2RDataset(torch_data.Dataset):
         return gt_trajs
 
     def __len__(self):
-        return len(self.data)
+        return len(self.alldata)
+
+    def load_images(self, scan, vp):
+        img_file = self.img_dir / scan / '{}_{}.png'.format(scan, vp)
+        assert img_file.exists()
+        panoramic_img = cv2.imread(str(img_file))  # BRG
+        img_12 = np.hsplit(panoramic_img, 12)
+        images = [
+            self.image_processor(
+                Image.fromarray(
+                    s[:, :, ::-1]  # BRG2RGB
+                )
+            ).unsqueeze(0)
+            for s in img_12
+        ]
+        images = torch.cat(images, dim=0)  # [12,3,224,224]
+        if self.training:
+            # apply random horizontal flip and color jitter
+            images = torchvision.transforms.RandomHorizontalFlip(p=0.5)(images)
+            images = torchvision.transforms.ColorJitter(brightness=0.5, hue=0.3)(images)
+
+        return images
+
+    def load_multi_step_data(self, paths, instruction, navigable_dict, scan,
+                             tokenizer=None):
+        """
+        Args:
+            paths: [start_viewpoint, ..., end_viewpoint]
+            instruction: "walk to ..." navigation instruction
+            navigable_dict: dict()
+                navigable_dict[viewpoint][next_viewpoint]:{
+                    'pointId': next view id,
+                }
+            scan:
+            tokenizer:
+
+        Multi-Step Dialog Settings:
+            Task-Description: xxx
+            #Step 1, Environment: <image0>...<image11>
+            #Action:<walkto?>
+            #Step 2, Environment: <image0>...<image11>
+            #Action:<walkto?>
+            ...
+        Returns:
+
+        """
+        # prompt = "{task_description}" \
+        #          "{instruction}" \
+        #          "{history}" \
+        #          "{environment}" \
+        #          "{question}" \
+        #          "{answer}" \
+        #          "{endofchunk}{tokenizer_eos_token}"
+        prompt = "{task_description}" \
+                 "{instruction}" \
+                 "{history}" \
+                 "{endofchunk}{tokenizer_eos_token}"
+        task_description = "Task: You are a mobile agent in an indoor building." \
+                           "I will provide 12 images of the environment in different directions from the current location." \
+                           "Given an input instruction, you need to move to the next location " \
+                           "based on the current environment and historical trajectory." \
+                           "Please use <walkto0>,<walkto1>,<walkto2>,<walkto3>,<walkto4>,<walkto5>," \
+                           "<walkto6>,<walkto7>,<walkto8>,<walkto9>,<walkto10>,<walkto11> to move " \
+                           "or <stop> to stop."
+
+        if isinstance(instruction, dict) and instruction.get('hint', None) is not None:
+            # CVDN Dataset
+            cvdn_steps = list(instruction.keys())
+            input_instruction = "\n#Instruction:{hint}{task}".format(
+                hint=instruction['hint'].replace(
+                    '\n', '').replace(
+                    '#Hint: ', '').replace(
+                    '#Hint:', ''),
+                task="Please find the room."
+            )
+        else:
+            input_instruction = "\n#Instruction:{}".format(instruction)
+            cvdn_steps = None
+
+        trajs = paths + [None] # T+1 steps
+        history_text = []
+        input_image = []
+        for t, vp in enumerate(trajs[:-1]):
+            # Language:
+            next_vp = trajs[t + 1]
+            if next_vp is None:
+                answer = "\n#Answer:<stop>"
+            else:
+                next_view_id = navigable_dict[vp][next_vp]['pointId']
+                answer = "\n#Answer:<walkto{}>".format(next_view_id)
+
+            environment = "\n#Step {},the environment is ".format(t + 1) \
+                          + "".join(['<image{}>'.format(x, x) for x in range(12)])
+
+            if cvdn_steps is not None and t in cvdn_steps:
+                t_qa = instruction[t]
+                if t_qa[-1] == '\n':
+                    t_qa = t_qa[:-1]
+                environment += "\n{Dialog}".format(
+                    Dialog=t_qa
+                )
+
+            history_text += [environment, answer]
+
+            # Vision:
+            images = self.load_images(scan, vp)
+            input_image.append(images)
+
+        history_text = "".join(history_text)
+        input_text = prompt.format(
+            task_description=task_description,
+            instruction=input_instruction,
+            history=history_text,
+            endofchunk='<|endofchunk|>',
+            tokenizer_eos_token='</s>'
+        )
+        input_text = input_text.replace(
+            "\n", "").replace(
+            "\t", "").replace(
+            "..", ".").replace(
+            "  ", " ")
+
+        return input_text, input_image
 
     def __getitem__(self, index):
-        item = self.data[index]
+        item = self.alldata[index]
         scan = item['scan']
-        viewpoint_ids = item['path']
-        heading = item['heading']
-        env = EnvBatch(
-            shortest_paths=self.shortest_paths[scan],
-            navigable_loc=self.navigable_loc[scan],
-            img_dir=self.img_dir,
-            batch_size=1
+        data_type = item['data_type']
+
+        if data_type == 'r2r':
+            paths = item['path']
+            instruction = item['instruction']
+            instr_id = item['instr_id']
+        elif data_type == 'soon':
+            paths = item['path']
+            instruction = item['instruction']['full_instruction']
+            instr_id = item['instr_id']
+
+        elif data_type == 'reverie':
+            paths = item['path']
+            instruction = item['instruction']
+            instr_id = item['instr_id']
+
+        elif data_type == 'eqa':
+            raise NotImplementedError
+
+        elif data_type == 'cvdn':
+            paths = item['paths']
+            instruction = item['instruction']
+            instr_id = item['instr_id']
+
+        input_text, input_image = self.load_multi_step_data(
+            paths=paths,
+            instruction=instruction,
+            navigable_dict=self.navigable_loc[scan],
+            scan=scan,
         )
-        env.newEpisodes([scan],[viewpoint_ids[0]],[heading])
-        return {
+
+        data_dict = {
+            'data_type': data_type, # 'r2r' 'soon' ...
             'sample_idx': index,
-            'path_id': item['path_id'],
-            'instr_id': item['instr_id'],
+            'instr_id': instr_id,
             'scan': scan,
-            'paths': viewpoint_ids,
-            'heading': heading,
-            'env': env,
-            'instruction': item['instruction']
+            'paths': paths,
+            'instruction': instruction,
+            'input_text': input_text,
+            'input_image': input_image,
         }
+
+        return data_dict
 
     @staticmethod
     def collate_batch(batch_list, _unused=False):
@@ -741,6 +860,7 @@ class R2RDataset(torch_data.Dataset):
 
         ret['batch_size'] = batch_size
         return ret
+
 
 class DistributedSampler(_DistributedSampler):
     def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True):
@@ -764,7 +884,11 @@ class DistributedSampler(_DistributedSampler):
         return iter(indices)
 
 
-def build_dataloader(dataset,batch_size,dist=False,training=True,workers=0,seed=None):
+def build_dataloader(args, dataset, seed=None):
+    batch_size = args.batch_size
+    dist = args.distributed
+    workers = args.workers
+    training = False if args.split != 'train' else True
     if dist:
         if training:
             sampler = torch.utils.data.distributed.DistributedSampler(dataset)
@@ -774,7 +898,10 @@ def build_dataloader(dataset,batch_size,dist=False,training=True,workers=0,seed=
     else:
         sampler = None
 
-    shuffle = False # (sampler is None) and training
+    if args.shuffle:
+        shuffle = (sampler is None) and training
+    else:
+        shuffle = False
 
     dataloader = DataLoader(
         dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,
