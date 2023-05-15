@@ -10,7 +10,7 @@ from dataset.preprocess_data import promptQAs
 from .train.train_utils import get_autocast, get_cast_dtype, AverageMeter
 import torch.nn.functional as F
 from dataset.process_multi_data import batch_process_text, batch_process_image
-
+from tools.common_utils import all_gather
 
 class Metrics(object):
     def __init__(self):
@@ -581,8 +581,13 @@ def evaluate(
     num_batches_per_epoch = r2r_dataloader.num_batches
     total_training_steps = num_batches_per_epoch * 1 # args.num_epochs
 
-    true_cases = 0
-    all_cases = 0
+    results = {
+        'r2r': 0, 'r2r_sum': 0,
+        'cvdn': 0, 'cvdn_sum': 0,
+        'soon': 0, 'soon_sum': 0,
+        'reverie': 0, 'reverie_sum': 0,
+        'true': 0, 'all': 0,
+    }
 
     pbar = tqdm(
         enumerate(r2r_dataloader),
@@ -628,17 +633,55 @@ def evaluate(
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         shift_preds = torch.argmax(shift_logits, dim=-1)
-        gt_action_indexs = (shift_labels.view(-1)!=-100).nonzero().view(-1)
-        gt_actions = shift_labels.view(-1).contiguous()[gt_action_indexs].detach().cpu().numpy()
-        pred_actions = shift_preds.view(-1).contiguous()[gt_action_indexs].detach().cpu().numpy()
-        assert ((gt_actions <= args.action_token_ids[-1]) &
-                (gt_actions >= args.action_token_ids[0])).any()
-        true_cases += (pred_actions == gt_actions).sum()
-        all_cases += gt_actions.shape[0]
 
-    logger.info("[Eval] {} split: Pred/All = ({})/({}) = {:.2f}%, Val Loss: {:.2f}".format(
-        args.split, true_cases, all_cases, (100*true_cases/all_cases), loss_metric.average
-    ))
+        sample_results = {
+            'r2r': 0, 'r2r_sum': 0,
+            'cvdn': 0, 'cvdn_sum': 0,
+            'soon': 0, 'soon_sum': 0,
+            'reverie': 0, 'reverie_sum': 0,
+            'true': 0, 'all': 0,
+        }
+
+        for bs in range(batch_size):
+            data_type = batch_dict['data_type'][bs]
+
+            gt_action_index = (shift_labels[bs]!=-100).nonzero().view(-1)
+            gt_actions = shift_labels[bs][gt_action_index].detach().cpu().numpy()
+            pred_actions = shift_preds[bs][gt_action_index].detach().cpu().numpy()
+            assert ((gt_actions <= args.action_token_ids[-1]) &
+                    (gt_actions >= args.action_token_ids[0])).any()
+
+            sample_results['true'] += (pred_actions == gt_actions).sum()
+            sample_results['all'] += gt_actions.shape[0]
+            sample_results[data_type] += (pred_actions == gt_actions).sum()
+            sample_results['{}_sum'.format(data_type)] += gt_actions.shape[0]
+
+        batch_results = all_gather(sample_results)
+        if args.rank == 0:
+            for per_results in batch_results:
+                for k,v in per_results.items():
+                    results[k] += v
+
+            pbar.update()
+            pbar.set_postfix(dict(
+                true_cases=results['true'],
+                all_cases=results['all'],
+                loss=loss_metric.average,
+                acc=(results['true']/results['all']),
+            ))
+
+    if args.rank == 0:
+        logger.info("[Eval] {} split: Pred/All = ({})/({}) = {:.2f}%, Val Loss: {:.2f}".format(
+            args.split, results['true'], results['all'], (100*results['true']/results['all']), loss_metric.average
+        ))
+        for k, v in results.items():
+            if 'sum' in k:
+                continue
+            if k == 'true' or k == 'all':
+                continue
+            logger.info(" - [{}] dataset: Pred/All = ({})/({}) = {:.2f}%".format(
+                k, results[k], results['{}_sum'.format(k)], (100*results[k]/(results['{}_sum'.format(k)]+1))
+            ))
 
 
 

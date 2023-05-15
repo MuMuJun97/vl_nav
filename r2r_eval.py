@@ -54,7 +54,7 @@ def main():
 
     device_id = init_distributed_device(args)  # TODO multi-GPU training.
 
-    log_file = Path(args.run_name) / ('train_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+    log_file = Path(args.run_name) / ('eval_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
 
     from tools import common_utils
     logger = common_utils.create_logger(log_file, rank=args.rank)
