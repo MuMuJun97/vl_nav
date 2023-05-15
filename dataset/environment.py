@@ -693,7 +693,7 @@ class R2RDataset(torch_data.Dataset):
         return images
 
     def load_multi_step_data(self, paths, instruction, navigable_dict, scan,
-                             tokenizer=None):
+                             tokenizer=None, item=None):
         """
         Args:
             paths: [start_viewpoint, ..., end_viewpoint]
@@ -825,6 +825,7 @@ class R2RDataset(torch_data.Dataset):
             instruction=instruction,
             navigable_dict=self.navigable_loc[scan],
             scan=scan,
+            item=item,
         )
 
         data_dict = {
