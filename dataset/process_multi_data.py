@@ -11,7 +11,7 @@ import cv2
 
 
 def load_r2r_data(anno_file):
-    assert anno_file.exists()
+    # assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)
     new_data = []
@@ -33,7 +33,7 @@ def load_r2r_data(anno_file):
 
 
 def load_reverie_data(anno_file):
-    assert anno_file.exists()
+    # assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)
     new_data = []
@@ -60,15 +60,15 @@ def load_soon_data(anno_file):
         "how to find the {target}?",  # 3
     ]
 
-    assert anno_file.exists()
+    # assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)
     new_data = []
     sample_index = 0
     for i, item in enumerate(data):
-        for j, path in enumerate(item['path'][:5]):
+        for j, path in enumerate(item['path']):
             # Split multiple instructions into separate entries
-            for k, instr in enumerate(item['instructions']):
+            for k, instr in enumerate(item['instructions'][0][:5]):
                 new_item = dict()
                 new_item['sample_idx'] = sample_index
                 # soon: idx-path_idx-instr_idx
@@ -84,23 +84,24 @@ def load_soon_data(anno_file):
                 new_item['scan'] = new_item['bbox']['scan']
 
                 # soon instructions
-                if j == 4:
-                    text = instr[j] # full instruction -> navigate
-                    question = "How to find the object described in the instruction?"
-                    answer = 'N/A'
+                if k == 4:
+                    text = instr # full instruction -> navigate
+                    # question = "How to find the object described in the instruction?"
+                    # answer = 'N/A'
                 else:
+                    continue
                     # full environment -> question and answer
                     text = 'N/A'
                     target = new_item['bbox']['obj_name']
                     if target is None or target == '' or target == 'None':
                         target = 'target'
                     question = soon_questions[j].format(target=target)
-                    answer = instr[j]
+                    answer = instr
                 new_item['instruction'] = {
                     'instruction': text,
-                    'question': question,
-                    'answer': answer,
-                    'full_instruction': instr[4]
+                    # 'question': question,
+                    # 'answer': answer,
+                    # 'full_instruction': instr
                 }
 
                 new_item['data_type'] = 'soon'
@@ -241,39 +242,32 @@ def load_cvdn_data(anno_file, shortest_paths):
         # else:
         #     trusted_path = item['planner_path'][:]  # trust the planner.
         trusted_path = item['planner_path'][:]  # trust the planner.
-
-        if item['dialog_history'][0]['nav_idx'] != item['dialog_history'][-1]['nav_idx']:
+        if True: #item['dialog_history'][0]['nav_idx'] != item['dialog_history'][-1]['nav_idx']:
             # multi-turn dialog
 
             dialog_text = {}
             paths = []
-            instruction = {}
+            texts = {}
 
             # 遍历history dialog,寻找发生过dialog的nodes.
             dialog_nodes = []
             for j, dialog in enumerate(item['dialog_history']):
                 # nav_idx = dialog['nav_idx'] - item['dialog_history'][0]['nav_idx']
                 nav_idx = dialog['nav_idx']
-                if dialog_text.get(nav_idx, None) is None:
+                if nav_idx not in dialog_text:
                     dialog_text[nav_idx] = []
                     dialog_nodes.append(item['nav_history'][nav_idx])
-                dialog_text[nav_idx].append(
-                    "#{}: {}.\n".format(
-                        "Question" if dialog['role'] == 'navigator' else "Answer",
-                        dialog['message']
-                    )
-                )
+                dialog_text[nav_idx].append(dialog['message'])
 
             history_paths = []
             for hi, history_node in enumerate(dialog_nodes[:-1]):
                 history_paths += shortest_paths[item['scan']][history_node][dialog_nodes[hi+1]][:-1]
+
             # add the latest question-answer position/viewpoint
             history_paths.append(
                 item['nav_history'][item['dialog_history'][-1]['nav_idx']]
             )
 
-            # max_path_lengths = len(history_paths) + \
-            #     max(len(item['player_path']), len(item['planner_path']))
             max_path_lengths = len(history_paths) + len(item['planner_path'])
 
             if max_path_lengths > 20:
@@ -296,7 +290,6 @@ def load_cvdn_data(anno_file, shortest_paths):
                 if paths[-1] != item['planner_path'][0]:
                     # planner_path是指示给 Oracle 用于回答 most recent question 的 navigation nodes. [Oracle Navigator]
                     # player_path是navigator在得到latest answer后做出的响应. [Human Response]
-                    assert paths[-1] == item['player_path'][0]
                     # paths += item['player_path'][1:]
                     # paths[-1] is the current position, item['planner_path'][-1] is the goal location.
                     paths += shortest_paths[item['scan']][
@@ -308,33 +301,33 @@ def load_cvdn_data(anno_file, shortest_paths):
 
                 assert paths[0] == dialog_nodes[0]
                 for vp, (k, v) in zip(dialog_nodes, dialog_text.items()):
-                    instruction[paths.index(vp)] = "".join(v)
+                    texts[paths.index(vp)] = v
 
-        else:
-            # single viewpoint: dialog
-            dialog_text = []
-            paths = []
-            for j, dialog in enumerate(item['dialog_history']):
-                dialog_text.append(
-                    "#{}: {}.\n".format(
-                        "Question" if dialog['role'] == 'navigator' else "Answer",
-                        dialog['message']
-                    )
-                )
-            dialog_text = "".join(dialog_text)
-            # check the start position == dialog position
-            assert item['nav_history'][item['dialog_history'][0]['nav_idx']] \
-                   == item['start_pano']['pano']
-            assert trusted_path[0] == item['start_pano']['pano']
-            paths += trusted_path
-            # the 0-th viewpoint -> dialog_text
-            instruction = {
-                0: dialog_text,
-            }
+        # else:
+        #     # single viewpoint: dialog
+        #     dialog_text = []
+        #     paths = []
+        #     for j, dialog in enumerate(item['dialog_history']):
+        #         dialog_text.append(
+        #             "#{}: {}.\n".format(
+        #                 "Question" if dialog['role'] == 'navigator' else "Answer",
+        #                 dialog['message']
+        #             )
+        #         )
+        #     dialog_text = "".join(dialog_text)
+        #     # check the start position == dialog position
+        #     assert item['nav_history'][item['dialog_history'][0]['nav_idx']] \
+        #            == item['start_pano']['pano']
+        #     assert trusted_path[0] == item['start_pano']['pano']
+        #     paths += trusted_path
+        #     # the 0-th viewpoint -> dialog_text
+        #     instruction = {
+        #         0: dialog_text,
+        #     }
 
-        instruction['hint'] = "#Hint: The goal room contains a {target}.\n".format(target=item['target'])
+        new_item['instruction'] = item['target']
 
-        new_item['instruction'] = instruction
+        new_item['texts'] = texts
         new_item['paths'] = paths
 
         assert len(paths) < 20
@@ -554,7 +547,13 @@ def batch_process_image(batch_image,batch_size):
 
 
 
-
-
-
-
+if __name__ == '__main__':
+    # soon_data = load_soon_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/SOON/annotations/iccv21_new_released/train.json')
+    # 26790
+    r2r_data = load_r2r_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/R2R/annotations/R2R_train_enc.json')
+    # 14039
+    # reverie_data = load_reverie_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/REVERIE/REVERIE_train.json')
+    # 10290
+    
+ 
+    import pdb;pdb.set_trace()

@@ -88,7 +88,7 @@ class SimState(object):
         self.location = ViewPoint(viewpointId)
         self.viewpointId = viewpointId
         self.step = step
-        self.viewIndex,self.heading,self.elevation = self.setHeading(heading,elevation=elevation)
+        self.viewIndex, self.heading, self.elevation = self.setHeading(heading, elevation=elevation)
         self.navigableLocations = {
             viewpointId: ViewPoint(viewpointId),
         }
@@ -722,74 +722,69 @@ class R2RDataset(torch_data.Dataset):
         #          "{question}" \
         #          "{answer}" \
         #          "{endofchunk}{tokenizer_eos_token}"
-        prompt = "{task_description}" \
-                 "{instruction}" \
-                 "{history}" \
-                 "{endofchunk}{tokenizer_eos_token}"
-        task_description = "Task: You are a mobile agent in an indoor building." \
-                           "I will provide 12 images of the environment in different directions from the current location." \
-                           "Given an input instruction, you need to move to the next location " \
-                           "based on the current environment and historical trajectory." \
-                           "Please use <walkto0>,<walkto1>,<walkto2>,<walkto3>,<walkto4>,<walkto5>," \
-                           "<walkto6>,<walkto7>,<walkto8>,<walkto9>,<walkto10>,<walkto11> to move " \
-                           "or <stop> to stop."
+        prompt = "System: {task_description}" \
+                 "\nCommander: {instruction}" \
+                 "{history}"
+        task_description = "You are a mobile agent in an indoor building." \
+                        #    "I will provide 12 images of the environment in different directions from the current location." \
+                        #    "Given an input instruction, you need to move to the next location " \
+                        #    "based on the current environment and historical trajectory." \
+                        #    "Please use <walkto0>,<walkto1>,<walkto2>,<walkto3>,<walkto4>,<walkto5>," \
+                        #    "<walkto6>,<walkto7>,<walkto8>,<walkto9>,<walkto10>,<walkto11> to move " \
+                        #    "or <stop> to stop."
 
-        if isinstance(instruction, dict) and instruction.get('hint', None) is not None:
-            # CVDN Dataset
-            cvdn_steps = list(instruction.keys())
-            input_instruction = "\n#Instruction:{hint}{task}".format(
-                hint=instruction['hint'].replace(
-                    '\n', '').replace(
-                    '#Hint: ', '').replace(
-                    '#Hint:', ''),
-                task="Please find the room."
-            )
-        else:
-            input_instruction = "\n#Instruction:{}".format(instruction)
-            cvdn_steps = None
+        # if isinstance(instruction, dict) and instruction.get('hint', None) is not None:
+        #     # CVDN Dataset
+        #     cvdn_steps = list(instruction.keys())
+        #     input_instruction = "\n#Instruction:{hint}{task}".format(
+        #         hint=instruction['hint'].replace(
+        #             '\n', '').replace(
+        #             '#Hint: ', '').replace(
+        #             '#Hint:', ''),
+        #         task="Please find the room."
+        #     )
+        # else:
+        #     input_instruction = "\n#Instruction:{}".format(instruction)
+        #     cvdn_steps = None
 
         trajs = paths + [None] # T+1 steps
         history_text = []
         input_image = []
         for t, vp in enumerate(trajs[:-1]):
+            history_text.append(
+                "\nEnvironment: " + " ".join(['<image{}>'.format(x, x) for x in range(12)])
+            )
             # Language:
+            if t in texts:
+                for idx, text in enumerate(texts[t]):
+                    if idx % 2 == 0:
+                        history_text.append("\nAgent: {}<\s>".format(text))
+                    else:
+                        history_text.append("\nCommander: {}".format(text))            
+            # Action:
             next_vp = trajs[t + 1]
             if next_vp is None:
-                answer = "\n#Answer:<stop>"
+                history_text.append("\nAgent: <stop><\s>")
             else:
                 next_view_id = navigable_dict[vp][next_vp]['pointId']
-                answer = "\n#Answer:<walkto{}>".format(next_view_id)
-
-            environment = "\n#Step {},the environment is ".format(t + 1) \
-                          + "".join(['<image{}>'.format(x, x) for x in range(12)])
-
-            if cvdn_steps is not None and t in cvdn_steps:
-                t_qa = instruction[t]
-                if t_qa[-1] == '\n':
-                    t_qa = t_qa[:-1]
-                environment += "\n{Dialog}".format(
-                    Dialog=t_qa
-                )
-
-            history_text += [environment, answer]
-
+                history_text.append("\nAgent: <walkto{}><\s>".format(next_view_id))
             # Vision:
             images = self.load_images(scan, vp)
             input_image.append(images)
 
         history_text = "".join(history_text)
+
         input_text = prompt.format(
             task_description=task_description,
-            instruction=input_instruction,
+            instruction=instruction,
             history=history_text,
-            endofchunk='<|endofchunk|>',
-            tokenizer_eos_token='</s>'
         )
-        input_text = input_text.replace(
-            "\n", "").replace(
-            "\t", "").replace(
-            "..", ".").replace(
-            "  ", " ")
+        # input_text = input_text.replace(
+        #     "\n", "").replace(
+        #     "\t", "").replace(
+        #     "..", ".").replace(
+        #     "  ", " ")
+        import pdb;pdb.set_trace()
 
         return input_text, input_image
 
@@ -797,31 +792,41 @@ class R2RDataset(torch_data.Dataset):
         item = self.alldata[index]
         scan = item['scan']
         data_type = item['data_type']
+        texts = {}
 
         if data_type == 'r2r':
             paths = item['path']
-            instruction = item['instruction']
+            instruction = 'Travel following the instruction, you can not ask for help. Instruction: ' \
+                + item['instruction']
             instr_id = item['instr_id']
+
         elif data_type == 'soon':
             paths = item['path']
-            instruction = item['instruction']['full_instruction']
+            instruction = 'Find the described target, you can not ask for help. Target: ' \
+                + item['instruction']['instruction']
             instr_id = item['instr_id']
 
         elif data_type == 'reverie':
             paths = item['path']
-            instruction = item['instruction']
+            instruction = 'Go to the location to complete the given task, you can not ask for help. Task: ' \
+                + item['instruction']
             instr_id = item['instr_id']
 
         elif data_type == 'eqa':
             raise NotImplementedError
 
         elif data_type == 'cvdn':
+
             paths = item['paths']
-            instruction = item['instruction']
+            texts = item['texts']
+            instruction = 'Find the described target, you can ask for help. Target: ' \
+                + item['instruction']
             instr_id = item['instr_id']
+
 
         input_text, input_image = self.load_multi_step_data(
             paths=paths,
+            texts=texts,
             instruction=instruction,
             navigable_dict=self.navigable_loc[scan],
             scan=scan,
