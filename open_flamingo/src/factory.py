@@ -103,7 +103,7 @@ def create_model_and_transforms(
 
     if r2r_tok:
         # add <walkto0-11>
-        action_tokens = ["<|endofchunk|>", "<image>"] \
+        action_tokens = ["<Agent>"] \
                         + ['<image{}>'.format(x) for x in range(12)] \
                         + ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
         media_token_id = None

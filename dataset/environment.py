@@ -752,22 +752,22 @@ class R2RDataset(torch_data.Dataset):
         input_image = []
         for t, vp in enumerate(trajs[:-1]):
             history_text.append(
-                "\nEnvironment: " + " ".join(['<image{}>'.format(x, x) for x in range(12)])
+                "\nEnvironment: " + "".join(['<image{}>'.format(x, x) for x in range(12)])
             )
             # Language:
             if t in texts:
                 for idx, text in enumerate(texts[t]):
                     if idx % 2 == 0:
-                        history_text.append("\nAgent: {}<\s>".format(text))
+                        history_text.append("\n<Agent>:{} </s>".format(text))
                     else:
                         history_text.append("\nCommander: {}".format(text))            
             # Action:
             next_vp = trajs[t + 1]
             if next_vp is None:
-                history_text.append("\nAgent: <stop><\s>")
+                history_text.append("\n<Agent>:<stop></s>")
             else:
                 next_view_id = navigable_dict[vp][next_vp]['pointId']
-                history_text.append("\nAgent: <walkto{}><\s>".format(next_view_id))
+                history_text.append("\n<Agent>:<walkto{}></s>".format(next_view_id))
             # Vision:
             images = self.load_images(scan, vp)
             input_image.append(images)
@@ -784,7 +784,6 @@ class R2RDataset(torch_data.Dataset):
         #     "\t", "").replace(
         #     "..", ".").replace(
         #     "  ", " ")
-        import pdb;pdb.set_trace()
 
         return input_text, input_image
 
