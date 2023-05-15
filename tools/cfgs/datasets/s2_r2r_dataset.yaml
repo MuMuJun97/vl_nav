@@ -9,6 +9,7 @@ Dataset:
 
   # Specify the dataset name to useR2R
   SOURCE: ['R2R', 'CVDN', 'SOON', 'REVERIE'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN"
+  
   SOON:
     DIR: "data/SOON/annotations/iccv21_new_released" # train.json
     SPLIT: {

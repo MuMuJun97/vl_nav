@@ -20,7 +20,7 @@ import torch.utils.data as torch_data
 from pathlib import Path
 
 class BaseDataset(torch_data.Dataset):
-    def __init__(self,config, split, training=True, logger=None, in_memory=True, **kwargs):
+    def __init__(self, config, split, training=True, logger=None, in_memory=True, **kwargs):
         super().__init__()
         self.config = config
         self.split = split
