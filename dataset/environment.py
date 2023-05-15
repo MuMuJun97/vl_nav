@@ -692,7 +692,7 @@ class R2RDataset(torch_data.Dataset):
 
         return images
 
-    def load_multi_step_data(self, paths, instruction, navigable_dict, scan,
+    def load_multi_step_data(self, paths, texts, instruction, navigable_dict, scan,
                              tokenizer=None, item=None):
         """
         Args:
