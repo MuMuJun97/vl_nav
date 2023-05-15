@@ -569,6 +569,80 @@ def train_one_epoch(
     return global_step
 
 
+@torch.no_grad()
+def evaluate(
+    args, model, r2r_dataset, r2r_dataloader, tokenizer, device_id, logger=None
+):
+    model.eval()
+    loss_metric = Metrics()
+    autocast = get_autocast(args.precision)
+    cast_dtype = get_cast_dtype(args.precision)
+
+    num_batches_per_epoch = r2r_dataloader.num_batches
+    total_training_steps = num_batches_per_epoch * 1 # args.num_epochs
+
+    true_cases = 0
+    all_cases = 0
+
+    pbar = tqdm(
+        enumerate(r2r_dataloader),
+        disable=args.rank!=0,
+        total=total_training_steps,
+        initial=(0 * num_batches_per_epoch)
+    )
+    for num_steps, batch_dict in pbar:
+        batch_size = batch_dict['batch_size']
+
+        # [2] IMAGE # size: [B, T_img*M=12*M, 1, 3, 224, 224]
+        input_image, image_mask = batch_process_image(batch_image=batch_dict['input_image'],batch_size=batch_size)
+        input_image = input_image.to(device_id, dtype=cast_dtype, non_blocking=True)
+
+        # [1] TEXT
+        input_ids, attention_mask, labels, image_mask = \
+            batch_process_text(
+                batch_dict=batch_dict,
+                tokenizer=tokenizer,
+                max_length=args.max_length,
+                args=args,
+                image_mask=image_mask,
+            )
+        image_mask = image_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
+
+        input_ids = input_ids.to(device_id, dtype=cast_dtype, non_blocking=True)
+        attention_mask = attention_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
+        labels = labels.to(device_id, dtype=cast_dtype, non_blocking=True)
+
+        with autocast():
+            outputs = model(
+                vision_x=(input_image,image_mask),
+                lang_x=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+            )
+            loss = outputs[0]
+            logits = outputs[1]
+
+        loss_metric.accumulate(loss.data.item())
+
+        # Shift so that tokens < n predict n
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        shift_preds = torch.argmax(shift_logits, dim=-1)
+        gt_action_indexs = (shift_labels.view(-1)!=-100).nonzero().view(-1)
+        gt_actions = shift_labels.view(-1).contiguous()[gt_action_indexs].detach().cpu().numpy()
+        pred_actions = shift_preds.view(-1).contiguous()[gt_action_indexs].detach().cpu().numpy()
+        assert ((gt_actions <= args.action_token_ids[-1]) &
+                (gt_actions >= args.action_token_ids[0])).any()
+        true_cases += (pred_actions == gt_actions).sum()
+        all_cases += gt_actions.shape[0]
+
+    logger.info("[Eval] {} split: Pred/All = ({})/({}) = {:.2f}%, Val Loss: {:.2f}".format(
+        args.split, true_cases, all_cases, (100*true_cases/all_cases), loss_metric.average
+    ))
+
+
+
+
 ###########################################################################################
     #     # [1] reset env
     #     obs = reset_env(batch_dict)
