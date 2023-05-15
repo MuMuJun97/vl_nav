@@ -57,6 +57,11 @@ class Flamingo(nn.Module):
             nn.LayerNorm(self.lang_encoder.config.hidden_size)
         )
 
+        self.angle_encoder = nn.Sequential(
+            nn.Linear(2, self.lang_encoder.config.hidden_size),
+            nn.LayerNorm(self.lang_encoder.config.hidden_size)
+        )
+
         # # @param: img views
         # self.view_nums = view_nums
         # self.img_id_embedding = nn.Embedding(view_nums, self.lang_encoder.config.hidden_size)
@@ -531,6 +536,7 @@ class Flamingo(nn.Module):
         Returns:
 
         """
+        input_angle_feats = vision_x[2]
         image_mask = vision_x[1]
         vision_x = vision_x[0]
 
@@ -553,4 +559,7 @@ class Flamingo(nn.Module):
         # view_id_embeds = self.img_id_embedding(view_id_tensor)
         # view_vision_x = vision_x + view_id_embeds
 
-        self.lang_encoder.condition_vis_x(vision_x, image_mask)
+        # angle feature embedding
+        angle_feats = self.angle_encoder(input_angle_feats)
+
+        self.lang_encoder.condition_vis_x(vision_x, image_mask, angle_feats)
