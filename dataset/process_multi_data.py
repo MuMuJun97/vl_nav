@@ -272,10 +272,12 @@ def load_cvdn_data(anno_file, shortest_paths):
                 item['nav_history'][item['dialog_history'][-1]['nav_idx']]
             )
 
-            max_path_lengths = len(history_paths) + \
-                max(len(item['player_path']), len(item['planner_path']))
+            # max_path_lengths = len(history_paths) + \
+            #     max(len(item['player_path']), len(item['planner_path']))
+            max_path_lengths = len(history_paths) + len(item['planner_path'])
 
             if max_path_lengths > 20:
+                continue
                 long_lengths += 1
                 paths += trusted_path
                 all_dialog_text = []
