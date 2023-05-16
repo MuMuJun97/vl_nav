@@ -482,6 +482,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
         padding=True,
         truncation=True,
         return_tensors="pt",
+        add_special_tokens=False
     )
 
     input_ids = batch_text['input_ids']
@@ -492,6 +493,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
         sample_text = tokenizer(
             batch_dict['input_text'][bs],
             return_tensors="pt",
+            add_special_tokens=False
         )
         sample_text_length = sample_text['input_ids'].shape[-1]
         # assert sample_text_length < max_length
@@ -508,13 +510,13 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
     for bs in range(batch_size):
         sample_text = input_ids[bs]
         # Task-description contains <walkto0>...<walkto11><stop>, remove!
-        start_locs = torch.nonzero(sample_text == 32001,as_tuple=True)[0]
+        start_locs = torch.nonzero(sample_text == 1,as_tuple=True)[0]
         end_locs = torch.nonzero(sample_text == 2,as_tuple=True)[0]
         if len(end_locs) < len(start_locs):
             end_locs.append(len(sample_text) - 1)
         assert len(start_locs) == len(end_locs)
         for loc_a, loc_b in zip(start_locs, end_locs):
-            labels[bs, loc_a+2: loc_b+1] = input_ids[bs, loc_a+2: loc_b+1]
+            labels[bs, loc_a+1: loc_b+1] = input_ids[bs, loc_a+1: loc_b+1]
         # only compute loss on: #Answer:<walkto{view_id}>
         # labels[bs,answer_locs] = input_ids[bs,answer_locs]
     return input_ids, batch_text['attention_mask'], labels, image_mask

@@ -1,5 +1,5 @@
-torchrun --nnodes=1 --nproc_per_node=1 r2r_train.py \
---tokenizer_path /mnt/lustre/share_data/huangshijia/alpaca \
+torchrun --nnodes=1 --nproc_per_node=8 r2r_train.py \
+--tokenizer_path /mnt/lustre/huangshijia.p/LLAMA_7B \
 --run_name baseline \
 --cfg_file tools/cfgs/datasets/s2_r2r_dataset.yaml \
 --batch_size 2 \
