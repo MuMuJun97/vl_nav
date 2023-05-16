@@ -842,17 +842,17 @@ class R2RDataset(torch_data.Dataset):
             if t in texts:
                 for idx, text in enumerate(texts[t]):
                     if idx % 2 == 0:
-                        history_text.append("\nAgent: {}<\s>".format(text))
+                        history_text.append("\n<Agent>:{} </s>".format(text))
                     else:
                         history_text.append("\nCommander: {}".format(text))            
             # Action:
             next_vp = trajs[t + 1]
             if next_vp is None:
-                history_text.append("\nAgent: <stop><\s>")
+                history_text.append("\n<Agent>:<stop></s>")
             else:
                 next_view_id = navigable_dict[vp][next_vp]['pointId']
                 assert next_view_id in list(valid_view.keys())
-                history_text.append("\nAgent: <walkto{}><\s>".format(next_view_id))
+                history_text.append("\n<Agent>:<walkto{}></s>".format(next_view_id))
                 next_heading = (next_view_id % 12) * math.radians(30)
 
             # Vision:
@@ -879,7 +879,6 @@ class R2RDataset(torch_data.Dataset):
         #     "\t", "").replace(
         #     "..", ".").replace(
         #     "  ", " ")
-        # import pdb;pdb.set_trace()
 
         input_image = torch.cat(input_image, dim=0)
         input_angle_feats = torch.cat(input_angle_feats, dim=0)

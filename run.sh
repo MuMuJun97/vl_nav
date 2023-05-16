@@ -7,4 +7,5 @@ torchrun --nnodes=1 --nproc_per_node=1 r2r_train.py \
 --vision_encoder_path "ViT-B-16" \
 --warmup_steps 500 \
 --workers 4 \
+--num_epochs 4 \
 --logging_steps 200
