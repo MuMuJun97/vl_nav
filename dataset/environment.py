@@ -832,8 +832,6 @@ class R2RDataset(torch_data.Dataset):
                 )
 
             history_text.append(
-                "\nEnvironment: " + "".join(['<image{}>'.format(x, x) for x in range(12)])
-
                 "\nEnvironment: " + "".join([
                     '<image{}>'.format(x, x) if x in valid_view.keys() else ''
                     for x in range(12)
