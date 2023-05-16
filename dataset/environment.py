@@ -852,7 +852,7 @@ class R2RDataset(torch_data.Dataset):
             else:
                 next_view_id = navigable_dict[vp][next_vp]['pointId']
                 assert next_view_id in list(valid_view.keys())
-                history_text.append("\n<Agent>:<walkto{}><\s>".format(next_view_id))
+                history_text.append("\n<Agent>:<walkto{}></s>".format(next_view_id))
                 next_heading = (next_view_id % 12) * math.radians(30)
 
             # Vision:
