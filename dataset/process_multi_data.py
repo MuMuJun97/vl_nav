@@ -510,8 +510,8 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
     for bs in range(batch_size):
         sample_text = input_ids[bs]
         # Task-description contains <walkto0>...<walkto11><stop>, remove!
-        start_locs = torch.nonzero(sample_text == 1,as_tuple=True)[0]
-        end_locs = torch.nonzero(sample_text == 2,as_tuple=True)[0]
+        start_locs = torch.nonzero(sample_text == 1,as_tuple=True)[0].tolist()
+        end_locs = torch.nonzero(sample_text == 2,as_tuple=True)[0].tolist()
         if len(end_locs) < len(start_locs):
             end_locs.append(len(sample_text) - 1)
         assert len(start_locs) == len(end_locs)
