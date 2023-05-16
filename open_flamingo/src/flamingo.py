@@ -439,7 +439,6 @@ class Flamingo(nn.Module):
 
         return input_ids
 
-    @torch.no_grad()
     def encode_image_with_mask(self, vision_x):
         """
         Args:
@@ -448,27 +447,22 @@ class Flamingo(nn.Module):
         Returns:
 
         """
-        input_angle_feats = vision_x[2]
-        image_mask = vision_x[1]
-        vision_x = vision_x[0]
+        with torch.no_grad():
+            input_angle_feats = vision_x[2]
+            image_mask = vision_x[1]
+            vision_x = vision_x[0]
 
-        assert vision_x.ndim == 6, "vision_x should be of shape (b, T_img, F, C, H, W)"
-        b, T, F = vision_x.shape[:3]
-        assert F == 1, "Only single frame supported"
+            assert vision_x.ndim == 6, "vision_x should be of shape (b, T_img, F, C, H, W)"
+            b, T, F = vision_x.shape[:3]
+            assert F == 1, "Only single frame supported"
 
-        vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
-        vision_x = self.vision_encoder.visual(vision_x)[1]
-        vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
+            # vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
+            vision_x = vision_x[image_mask].flatten(0,1)
+            vision_x = self.vision_encoder.visual(vision_x)[1]
+            vision_x = vision_x.mean(dim=-2)
+            # vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
 
-        vision_x = self.mapper(vision_x.mean(dim=-2))
-        vision_x = vision_x.squeeze(dim=-2)
+        vision_x = self.mapper(vision_x)
+        angle_feats = self.angle_encoder(input_angle_feats[image_mask])
 
-        # view embedding
-        # view_id_tensor = torch.arange(vision_x.shape[1], device=vision_x.device).repeat((vision_x.shape[0], 1))
-        # view_id_embeds = self.img_id_embedding(view_id_tensor)
-        # view_vision_x = vision_x + view_id_embeds
-
-        # angle feature embedding
-        angle_feats = self.angle_encoder(input_angle_feats)
-
-        self.lang_encoder.condition_vis_x(vision_x, image_mask, angle_feats)
+        self.lang_encoder.condition_vis_x(vision_x + angle_feats)
