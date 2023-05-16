@@ -175,6 +175,7 @@ def create_model_and_transforms(
     # model.perceiver.requires_grad_(True)
     model.mapper.requires_grad_(True)
     model.lang_encoder.requires_grad_(True)
+    model.angle_encoder.requires_grad_(True)
 
     # if r2r_tok:
     #     model.history_encoder.requires_grad_(True)

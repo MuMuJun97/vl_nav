@@ -71,9 +71,10 @@ class FlamingoLMMixin(nn.Module):
     def _set_decoder_layers(self, value):
         setattr_recursive(self, self.decoder_layers_attr_name, value)
 
-    def condition_vis_x(self, vis_x, image_mask=None):
+    def condition_vis_x(self, vis_x, image_mask=None, angle_feats=None):
         self.vis_x = vis_x
         self.image_mask = image_mask
+        self.angle_feats = angle_feats
 
     def set_history_state(self, state):
         self.state = state
@@ -145,8 +146,14 @@ class FlamingoLMMixin(nn.Module):
                 inputs_embeds = self.model.embed_tokens(input_ids)
                 media_shape = inputs_embeds[media_locations].shape
                 if self.image_mask is not None:
-                    # image_mask = self.image_mask.repeat(1, 12)
-                    inputs_embeds[media_locations] += self.vis_x[self.image_mask].reshape(media_shape)
+                    if self.angle_feats is not None:
+                        inputs_embeds[media_locations] += (
+                            self.vis_x[self.image_mask].reshape(media_shape)
+                            + self.angle_feats[self.image_mask]
+                        )
+                    else:
+                        # image_mask = self.image_mask.repeat(1, 12)
+                        inputs_embeds[media_locations] += self.vis_x[self.image_mask].reshape(media_shape)
                 else:
                     inputs_embeds[media_locations] += self.vis_x.reshape(media_shape)
 

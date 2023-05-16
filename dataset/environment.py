@@ -8,6 +8,7 @@ import torch.utils.data as torch_data
 from pathlib import Path
 import random
 import os
+import math
 from PIL import Image
 import networkx as nx
 import cv2
@@ -671,11 +672,13 @@ class R2RDataset(torch_data.Dataset):
     def __len__(self):
         return len(self.alldata)
 
-    def load_images(self, scan, vp):
+    def load_images(self, scan, vp, valid_ids=None):
         img_file = self.img_dir / scan / '{}_{}.png'.format(scan, vp)
         assert img_file.exists()
         panoramic_img = cv2.imread(str(img_file))  # BRG
         img_12 = np.hsplit(panoramic_img, 12)
+        if valid_ids is not None:
+            img_12 = [img_12[i] for i in valid_ids]
         images = [
             self.image_processor(
                 Image.fromarray(
@@ -691,6 +694,66 @@ class R2RDataset(torch_data.Dataset):
             images = torchvision.transforms.ColorJitter(brightness=0.5, hue=0.3)(images)
 
         return images
+
+    def setHeading(self, heading, headingCount=12, elevation=0):
+        M_PI = math.pi
+        elevationIncrement = M_PI / 6.0 # 30°
+        state_heading = heading % (M_PI*2.0)
+        while state_heading < 0.0:
+            state_heading += math.pi*2.0
+        # Snap heading to nearest discrete value
+        headingIncrement = M_PI * 2.0 / headingCount
+        heading_step = round(state_heading / headingIncrement)
+        if heading_step == headingCount:
+            heading_step = 0
+        state_heading = heading_step * headingIncrement
+        # Snap elevation to nearest discrete value (disregarding elevation limits)
+        if elevation < -elevationIncrement/2.0:
+            elevation = -elevationIncrement
+            viewIndex = heading_step
+        elif elevation > elevationIncrement/2.0:
+            elevation = elevationIncrement
+            viewIndex = heading_step + 2*headingCount
+        else:
+            elevation = 0.0
+            viewIndex = heading_step + headingCount
+        return viewIndex,state_heading,elevation
+
+    def compute_angle_features(self, candidates: dict, heading: float):
+        """
+        Args:
+            candidates: candidate viewpoints, dict{}
+            heading: float, current viewpoint->heading
+
+        Returns:
+
+        """
+        valid_view = dict()
+        view_index, state_heading, _ = self.setHeading(heading)
+        base_heading = state_heading
+        cur_vp = candidates[list(candidates.keys())[0]]
+
+        for vp, candidate in candidates.items():
+            if vp == cur_vp['viewpointId']:
+                continue
+            if valid_view.get(candidate['pointId'], None) is None:
+                valid_view[candidate['pointId']] = dict()
+
+            # "normalized_heading": state.heading + loc.rel_heading
+            normalized_heading = candidate['normalized_heading']
+
+            # adj_dict[loc.viewpointId]['heading']: state.heading - base_heading + loc.rel_heading
+            adj_heading = normalized_heading - base_heading
+            adj_angle_feature = np.array(
+                [math.sin(adj_heading), math.cos(adj_heading)],
+                dtype=np.float32
+            )
+            valid_view[candidate['pointId']].update({
+                'angle_feats': adj_angle_feature,
+                'viewpointId': candidate['viewpointId'],
+            })
+        return valid_view
+
 
     def load_multi_step_data(self, paths, texts, instruction, navigable_dict, scan,
                              tokenizer=None, item=None):
@@ -750,10 +813,33 @@ class R2RDataset(torch_data.Dataset):
         trajs = paths + [None] # T+1 steps
         history_text = []
         input_image = []
+        input_angle_feats = []
+        next_heading = None
         for t, vp in enumerate(trajs[:-1]):
+            # Angle, Candidates
+            if t == 0:
+                heading = item['heading'] if item.get('heading', None) is not None else 0.
+                valid_view = self.compute_angle_features(
+                    candidates=navigable_dict[vp],
+                    heading=heading,
+                )
+            else:
+                assert next_heading is not None
+                heading = next_heading
+                valid_view = self.compute_angle_features(
+                    candidates=navigable_dict[vp],
+                    heading=heading,
+                )
+
             history_text.append(
                 "\nEnvironment: " + "".join(['<image{}>'.format(x, x) for x in range(12)])
+
+                "\nEnvironment: " + "".join([
+                    '<image{}>'.format(x, x) if x in valid_view.keys() else ''
+                    for x in range(12)
+                ])
             )
+
             # Language:
             if t in texts:
                 for idx, text in enumerate(texts[t]):
@@ -767,10 +853,21 @@ class R2RDataset(torch_data.Dataset):
                 history_text.append("\n<Agent>:<stop></s>")
             else:
                 next_view_id = navigable_dict[vp][next_vp]['pointId']
-                history_text.append("\n<Agent>:<walkto{}></s>".format(next_view_id))
+                assert next_view_id in list(valid_view.keys())
+                history_text.append("\n<Agent>:<walkto{}><\s>".format(next_view_id))
+                next_heading = (next_view_id % 12) * math.radians(30)
+
             # Vision:
-            images = self.load_images(scan, vp)
+            images = self.load_images(scan, vp, valid_ids=list(valid_view.keys()))
             input_image.append(images)
+
+            # Angle:
+            per_angle_feats = []
+            for k, v in valid_view.items():
+                per_angle_feats.append(v['angle_feats'])
+            input_angle_feats.append(torch.from_numpy(
+                np.stack(per_angle_feats)
+            ))
 
         history_text = "".join(history_text)
 
@@ -785,7 +882,10 @@ class R2RDataset(torch_data.Dataset):
         #     "..", ".").replace(
         #     "  ", " ")
 
-        return input_text, input_image
+        input_image = torch.cat(input_image, dim=0)
+        input_angle_feats = torch.cat(input_angle_feats, dim=0)
+
+        return input_text, input_image, input_angle_feats
 
     def __getitem__(self, index):
         item = self.alldata[index]
@@ -822,15 +922,15 @@ class R2RDataset(torch_data.Dataset):
                 + item['instruction']
             instr_id = item['instr_id']
 
-
-        input_text, input_image = self.load_multi_step_data(
-            paths=paths,
-            texts=texts,
-            instruction=instruction,
-            navigable_dict=self.navigable_loc[scan],
-            scan=scan,
-            item=item,
-        )
+        input_text, input_image, input_angle_feats \
+            = self.load_multi_step_data(
+                paths=paths,
+                texts=texts,
+                instruction=instruction,
+                navigable_dict=self.navigable_loc[scan],
+                scan=scan,
+                item=item,
+            )
 
         data_dict = {
             'data_type': data_type, # 'r2r' 'soon' ...
@@ -841,6 +941,7 @@ class R2RDataset(torch_data.Dataset):
             'instruction': instruction,
             'input_text': input_text,
             'input_image': input_image,
+            'input_angle_feats': input_angle_feats,
         }
 
         return data_dict

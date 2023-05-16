@@ -520,34 +520,53 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
     return input_ids, batch_text['attention_mask'], labels, image_mask
 
 
-def batch_process_image(batch_image,batch_size):
+def batch_process_image(batch_image, batch_size, batch_angle_feats):
     """
     Args:
         batch_image: List[]
         batch_size:
+        batch_angle_feats:
 
     Returns:
 
     """
     input_image = []
+    input_angle_feats = []
     image_lens = [len(im) for im in batch_image]
     image_mask = torch.arange(max(image_lens)).unsqueeze(0).repeat(batch_size, 1)
     image_mask = image_mask < torch.tensor(image_lens).unsqueeze(1)
     for bs in range(batch_size):
         if image_mask[bs].all():
             # M: multi steps. size: (M*12, 3, 224, 224)
-            image = torch.cat(batch_image[bs], dim=0)
+            # image = torch.cat(batch_image[bs], dim=0)
+            image = batch_image[bs]
+
+            # angle
+            angle_feats = batch_angle_feats[bs]
         else:
-            pad_image = torch.zeros_like(batch_image[bs][0])
-            image = batch_image[bs] + [pad_image] * ((image_mask[bs] == False).sum().item())
-            image = torch.cat(image, dim=0)
+            pad_image = torch.zeros_like(batch_image[bs][0]).unsqueeze(dim=0)
+            # image = batch_image[bs] + [pad_image] * ((image_mask[bs] == False).sum().item())
+            pad_image = [batch_image[bs]] + [pad_image] * ((image_mask[bs] == False).sum().item())
+            image = torch.cat(pad_image, dim=0)
+            # image = torch.cat(image, dim=0)
+
+            # angle
+            pad_angle_feats = torch.zeros_like(batch_angle_feats[bs][0]).unsqueeze(dim=0)
+            pad_angle_feats = [batch_angle_feats[bs]] + [pad_angle_feats] * ((image_mask[bs] == False).sum().item())
+            angle_feats = torch.cat(pad_angle_feats, dim=0)
+
         input_image.append(image)
+        input_angle_feats.append(angle_feats)
+
     input_image = torch.stack(input_image, dim=0)
     # [B, T_img*M=12*M, 1, 3, 224, 224]
     input_image = input_image.unsqueeze(2)
-    image_mask = image_mask.unsqueeze(dim=-1).repeat(
-        1, 1, 12).view(batch_size,-1).contiguous()
-    return input_image, image_mask
+    # image_mask = image_mask.unsqueeze(dim=-1).repeat(
+    #     1, 1, 12).view(batch_size,-1).contiguous()
+
+    input_angle_feats = torch.stack(input_angle_feats, dim=0)
+
+    return input_image, image_mask, input_angle_feats
 
 
 

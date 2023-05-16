@@ -57,6 +57,10 @@ class Flamingo(nn.Module):
             nn.LayerNorm(self.lang_encoder.config.hidden_size)
         )
 
+        self.angle_encoder = nn.Sequential(
+            nn.Linear(2, self.lang_encoder.config.hidden_size),
+            nn.LayerNorm(self.lang_encoder.config.hidden_size)
+        )
 
     def forward_train(
         self,
@@ -444,6 +448,7 @@ class Flamingo(nn.Module):
         Returns:
 
         """
+        input_angle_feats = vision_x[2]
         image_mask = vision_x[1]
         vision_x = vision_x[0]
 
@@ -458,4 +463,12 @@ class Flamingo(nn.Module):
         vision_x = self.mapper(vision_x.mean(dim=-2))
         vision_x = vision_x.squeeze(dim=-2)
 
-        self.lang_encoder.condition_vis_x(vision_x, image_mask)
+        # view embedding
+        # view_id_tensor = torch.arange(vision_x.shape[1], device=vision_x.device).repeat((vision_x.shape[0], 1))
+        # view_id_embeds = self.img_id_embedding(view_id_tensor)
+        # view_vision_x = vision_x + view_id_embeds
+
+        # angle feature embedding
+        angle_feats = self.angle_encoder(input_angle_feats)
+
+        self.lang_encoder.condition_vis_x(vision_x, image_mask, angle_feats)
