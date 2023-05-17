@@ -778,13 +778,6 @@ class R2RDataset(torch_data.Dataset):
         Returns:
 
         """
-        # prompt = "{task_description}" \
-        #          "{instruction}" \
-        #          "{history}" \
-        #          "{environment}" \
-        #          "{question}" \
-        #          "{answer}" \
-        #          "{endofchunk}{tokenizer_eos_token}"
         prompt = "System: {task_description}" \
                  "\nCommander: {instruction}" \
                  "{history}"
@@ -796,80 +789,31 @@ class R2RDataset(torch_data.Dataset):
                         #    "<walkto6>,<walkto7>,<walkto8>,<walkto9>,<walkto10>,<walkto11> to move " \
                         #    "or <stop> to stop."
 
-        # if isinstance(instruction, dict) and instruction.get('hint', None) is not None:
-        #     # CVDN Dataset
-        #     cvdn_steps = list(instruction.keys())
-        #     input_instruction = "\n#Instruction:{hint}{task}".format(
-        #         hint=instruction['hint'].replace(
-        #             '\n', '').replace(
-        #             '#Hint: ', '').replace(
-        #             '#Hint:', ''),
-        #         task="Please find the room."
-        #     )
-        # else:
-        #     input_instruction = "\n#Instruction:{}".format(instruction)
-        #     cvdn_steps = None
-
-        trajs = paths + [None] # T+1 steps
-        history_text = []
+        trajs = paths # T+1 steps
+        history_text = ""
         input_image = []
         input_angle_feats = []
-        next_heading = None
+        heading = item['heading'] if item.get('heading', None) is not None else 0.
 
-        is_eqa_end = False
-
-        for t, vp in enumerate(trajs[:-1]):
-            # Angle, Candidates
-            if t == 0:
-                heading = item['heading'] if item.get('heading', None) is not None else 0.
-                valid_view = self.compute_angle_features(
-                    candidates=navigable_dict[vp],
-                    heading=heading,
-                )
-            else:
-                assert next_heading is not None
-                heading = next_heading
-                valid_view = self.compute_angle_features(
-                    candidates=navigable_dict[vp],
-                    heading=heading,
-                )
-
-            history_text.append(
-                "\nEnvironment: " + "".join([
-                    '<image{}>'.format(x, x) if x in valid_view.keys() else ''
-                    for x in range(12)
-                ])
-            )
-
-            if isinstance(texts, str):
-                # for EQA Dataset, Language:
-                if t == len(paths) - 1:
-                    is_eqa_end = True
-            else:
-                # for CVDN Dataset, Language:
-                if t in texts:
-                    for idx, text in enumerate(texts[t]):
-                        if idx % 2 == 0:
-                            history_text.append("\nAgent: <s> {} </s>".format(text))
-                        else:
-                            history_text.append("\nCommander: {}".format(text))
-            # Action:
-            next_vp = trajs[t + 1]
-            if next_vp is None:
-                history_text.append("\nAgent: <s><stop></s>")
-                if is_eqa_end:
-                    history_text.append("\nAgent: <s>{}</s>".format(texts))
-            else:
-                next_view_id = navigable_dict[vp][next_vp]['pointId']
-                assert next_view_id in list(valid_view.keys())
-                history_text.append("\nAgent: <s><walkto{}></s>".format(next_view_id))
-                next_heading = (next_view_id % 12) * math.radians(30)
+        trajs_len = len(trajs)
+        for t, vp in enumerate(trajs):
+            if vp is None:
+                break
 
             # Vision:
+            valid_view = self.compute_angle_features(
+                candidates=navigable_dict[vp],
+                heading=heading,
+            )
+
+            history_text += "\nEnvironment: " + "".join([
+                '<image{}>'.format(x, x) if x in valid_view.keys() else ''
+                for x in range(12)
+            ])
+            
             images = self.load_images(scan, vp, valid_ids=list(valid_view.keys()))
             input_image.append(images)
 
-            # Angle:
             per_angle_feats = []
             for k, v in valid_view.items():
                 per_angle_feats.append(v['angle_feats'])
@@ -877,18 +821,30 @@ class R2RDataset(torch_data.Dataset):
                 np.stack(per_angle_feats)
             ))
 
-        history_text = "".join(history_text)
+            # Text:
+            if t in texts:
+                for idx, text in enumerate(texts[t]):
+                    if idx % 2 == 0:
+                        history_text += "\nAgent: <s> {} </s>".format(text)
+                    else:
+                        history_text += "\nCommander: {}".format(text)
+
+            # Action:
+            if t != trajs_len - 1:
+                next_vp = trajs[t + 1]
+                if next_vp is None:
+                    history_text += "\nAgent: <s><stop></s>"
+                else:
+                    next_view_id = navigable_dict[vp][next_vp]['pointId']
+                    assert next_view_id in list(valid_view.keys())
+                    history_text += "\nAgent: <s><walkto{}></s>".format(next_view_id)
+                    heading = (next_view_id % 12) * math.radians(30)
 
         input_text = prompt.format(
             task_description=task_description,
             instruction=instruction,
             history=history_text,
         )
-        # input_text = input_text.replace(
-        #     "\n", "").replace(
-        #     "\t", "").replace(
-        #     "..", ".").replace(
-        #     "  ", " ")
 
         input_image = torch.cat(input_image, dim=0)
         input_angle_feats = torch.cat(input_angle_feats, dim=0)
@@ -902,34 +858,32 @@ class R2RDataset(torch_data.Dataset):
         texts = {}
 
         if data_type == 'r2r':
-            paths = item['path']
+            paths = item['path'] + [None]
             instruction = 'Travel following the instruction, you can not ask for help. Instruction: ' \
                 + item['instruction']
             instr_id = item['instr_id']
 
         elif data_type == 'soon':
-            paths = item['path']
+            paths = item['path'] + [None]
             instruction = 'Find the described target, you can not ask for help. Target: ' \
                 + item['instruction']['instruction']
             instr_id = item['instr_id']
 
         elif data_type == 'reverie':
-            paths = item['path']
+            paths = item['path'] + [None]
             instruction = 'Go to the location to complete the given task, you can not ask for help. Task: ' \
                 + item['instruction']
             instr_id = item['instr_id']
 
         elif data_type == 'eqa':
             paths = item['path']
-            instruction = 'Find the answer to the question in the environment and answer it, ' \
-                          'you can not ask for help. Task: ' \
+            instruction = 'Explore the scene and answer the question, you can not ask for help. Question: ' \
                           + item['instruction']
             instr_id = item['instr_id']
             texts = item['texts']
 
         elif data_type == 'cvdn':
-
-            paths = item['paths']
+            paths = item['paths'] + [None]
             texts = item['texts']
             instruction = 'Find the described target, you can ask for help. Target: ' \
                 + item['instruction']

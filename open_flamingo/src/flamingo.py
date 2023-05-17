@@ -449,7 +449,7 @@ class Flamingo(nn.Module):
         """
         with torch.no_grad():
             input_angle_feats = vision_x[2]
-            image_mask = vision_x[1]
+            image_mask = vision_x[1].bool()
             vision_x = vision_x[0]
 
             assert vision_x.ndim == 6, "vision_x should be of shape (b, T_img, F, C, H, W)"

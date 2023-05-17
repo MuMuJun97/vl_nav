@@ -152,7 +152,7 @@ def create_model_and_transforms(
     model = Flamingo(
         vision_encoder,
         lang_encoder,
-        text_tokenizer.encode("<|endofchunk|>")[-1],
+        text_tokenizer.encode("</s>")[-1],
         media_token_id=media_token_id,
         vis_dim=open_clip.get_model_config(clip_vision_encoder_path)["vision_cfg"][
             "width"

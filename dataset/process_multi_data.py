@@ -128,9 +128,9 @@ def load_fr2r_data(anno_file):
     return new_data
 
 
-def load_eqa_data(anno_file,split='train',vis=False):
+def load_eqa_data(anno_file, split='train', vis=False):
     # raise NotImplementedError
-    assert anno_file.exists()
+    # assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)[split]
 
@@ -180,7 +180,7 @@ def load_eqa_data(anno_file,split='train',vis=False):
             else:
                 raise NotImplementedError
 
-            new_item['texts'] = answer_prompt
+            new_item['texts'] = {len(new_item['path']) - 1: [answer_prompt]}
             new_data.append(new_item)
             sample_index += 1
 
@@ -613,10 +613,10 @@ def batch_process_image(batch_image, batch_size, batch_angle_feats):
 if __name__ == '__main__':
     # soon_data = load_soon_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/SOON/annotations/iccv21_new_released/train.json')
     # 26790
-    r2r_data = load_r2r_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/R2R/annotations/R2R_train_enc.json')
+    # r2r_data = load_r2r_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/R2R/annotations/R2R_train_enc.json')
     # 14039
     # reverie_data = load_reverie_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/REVERIE/REVERIE_train.json')
     # 10290
-    
+    eqa_data = load_eqa_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/mp3d/mp3d_eqa_dict.json')
  
     import pdb;pdb.set_trace()
