@@ -460,9 +460,10 @@ class Flamingo(nn.Module):
             vision_x = vision_x[image_mask].flatten(0,1)
             vision_x = self.vision_encoder.visual(vision_x)[1]
             vision_x = vision_x.mean(dim=-2)
+            input_angle_feats = input_angle_feats[image_mask]
             # vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
 
         vision_x = self.mapper(vision_x)
-        angle_feats = self.angle_encoder(input_angle_feats[image_mask])
+        angle_feats = self.angle_encoder(input_angle_feats)
 
         self.lang_encoder.condition_vis_x(vision_x + angle_feats)

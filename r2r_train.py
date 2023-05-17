@@ -155,7 +155,7 @@ def main():
             logger=logger
         )
 
-        if args.rank == 0 and epoch % args.save_ckpt_step == 0:
+        if args.rank == 0 and (epoch % args.save_ckpt_step == 0 or epoch == args.num_epochs-1):
             min_val_loss = 0
             save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step, min_val_loss)
 

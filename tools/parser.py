@@ -101,7 +101,7 @@ def read_args():
     )
 
     parser.add_argument("--warmup_steps", default=5000, type=int)
-    parser.add_argument("--weight_decay", default=0.05, type=float)
+    parser.add_argument("--weight_decay", default=0.00, type=float)
     parser.add_argument(
         "--precision",
         choices=["amp_bf16", "amp_bfloat16", "bf16", "fp16", "fp32"],

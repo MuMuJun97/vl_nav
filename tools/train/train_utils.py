@@ -44,18 +44,8 @@ class AverageMeter(object):
 def get_grouped_params(model,args):
     params_with_wd, params_without_wd = [], []
 
-    def apply_decay(x):
-        return (
-                "gated_cross_attn_layer" in x
-                and "ff_gate" not in x
-                and "attn_gate" not in x
-                and "norm" not in x
-                and "bias" not in x
-        )
-
     for n, p in model.named_parameters():
-        # if p.requires_grad:
-        if apply_decay(n):
+        if p.requires_grad:
             params_with_wd.append(p)
         else:
             params_without_wd.append(p)
