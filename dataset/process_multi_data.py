@@ -129,7 +129,7 @@ def load_fr2r_data(anno_file):
 
 
 def load_eqa_data(anno_file,split='train',vis=False):
-    raise NotImplementedError
+    # raise NotImplementedError
     assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)[split]
@@ -137,6 +137,9 @@ def load_eqa_data(anno_file,split='train',vis=False):
     # filter data:
     new_data = []
     qa_set = set()
+
+    sample_index = 0
+
     for i, item in enumerate(data):
         qa_item = item['question']['question_text'] + \
                   item['question']['answer_text'] + \
@@ -146,7 +149,40 @@ def load_eqa_data(anno_file,split='train',vis=False):
             continue
         else:
             qa_set.add(qa_item)
-            new_data.append(item)
+
+            new_item = dict(item)
+            new_item['sample_idx'] = sample_index
+            new_item['instr_id'] = item['episode_id']
+            new_item['instruction'] = item['question']['question_text']
+            new_item['data_type'] = 'eqa'
+            question_type = item['question']['question_type']
+
+            question_location = item['question']['question_location']
+            if '_' in question_location:
+                item['question']['question_location'] = ' '.join(question_location.split('_'))
+
+            if question_type == 'color_room':
+                answer_prompt = "The color of the {target} in the {room} is {answer}".format(
+                    target=item['question']['question_object'],
+                    room=item['question']['question_location'],
+                    answer=item['question']['answer_text']
+                )
+            elif question_type == 'color':
+                answer_prompt = "The color of the {target} is {answer}".format(
+                    target=item['question']['question_object'],
+                    answer=item['question']['answer_text']
+                )
+            elif question_type == 'location':
+                answer_prompt = "The location of the {target} is {answer}".format(
+                    target=item['question']['question_object'],
+                    answer=item['question']['answer_text']
+                )
+            else:
+                raise NotImplementedError
+
+            new_item['texts'] = answer_prompt
+            new_data.append(new_item)
+            sample_index += 1
 
     if False:
         img_dir = Path("/media/zlin/2CD830B2D8307C60/Dataset/features/mp3d_raw_images")

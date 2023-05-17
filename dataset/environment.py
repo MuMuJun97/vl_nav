@@ -815,6 +815,9 @@ class R2RDataset(torch_data.Dataset):
         input_image = []
         input_angle_feats = []
         next_heading = None
+
+        is_eqa_end = False
+
         for t, vp in enumerate(trajs[:-1]):
             # Angle, Candidates
             if t == 0:
@@ -838,17 +841,24 @@ class R2RDataset(torch_data.Dataset):
                 ])
             )
 
-            # Language:
-            if t in texts:
-                for idx, text in enumerate(texts[t]):
-                    if idx % 2 == 0:
-                        history_text.append("\nAgent: <s> {} </s>".format(text))
-                    else:
-                        history_text.append("\nCommander: {}".format(text))            
+            if isinstance(texts, str):
+                # for EQA Dataset, Language:
+                if t == len(paths) - 1:
+                    is_eqa_end = True
+            else:
+                # for CVDN Dataset, Language:
+                if t in texts:
+                    for idx, text in enumerate(texts[t]):
+                        if idx % 2 == 0:
+                            history_text.append("\nAgent: <s> {} </s>".format(text))
+                        else:
+                            history_text.append("\nCommander: {}".format(text))
             # Action:
             next_vp = trajs[t + 1]
             if next_vp is None:
                 history_text.append("\nAgent: <s><stop></s>")
+                if is_eqa_end:
+                    history_text.append("\nAgent: <s>{}</s>".format(texts))
             else:
                 next_view_id = navigable_dict[vp][next_vp]['pointId']
                 assert next_view_id in list(valid_view.keys())
@@ -910,7 +920,12 @@ class R2RDataset(torch_data.Dataset):
             instr_id = item['instr_id']
 
         elif data_type == 'eqa':
-            raise NotImplementedError
+            paths = item['path']
+            instruction = 'Find the answer to the question in the environment and answer it, ' \
+                          'you can not ask for help. Task: ' \
+                          + item['instruction']
+            instr_id = item['instr_id']
+            texts = item['texts']
 
         elif data_type == 'cvdn':
 
