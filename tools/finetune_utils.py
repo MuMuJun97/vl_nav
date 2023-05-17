@@ -604,8 +604,13 @@ def evaluate(
         batch_size = batch_dict['batch_size']
 
         # [2] IMAGE # size: [B, T_img*M=12*M, 1, 3, 224, 224]
-        input_image, image_mask = batch_process_image(batch_image=batch_dict['input_image'],batch_size=batch_size)
+        input_image, image_mask, input_angle_feats = batch_process_image(
+            batch_image=batch_dict['input_image'],
+            batch_size=batch_size,
+            batch_angle_feats=batch_dict['input_angle_feats']
+        )
         input_image = input_image.to(device_id, dtype=cast_dtype, non_blocking=True)
+        input_angle_feats = input_angle_feats.to(device_id, dtype=cast_dtype, non_blocking=True)
 
         # [1] TEXT
         input_ids, attention_mask, labels, image_mask = \
@@ -624,7 +629,7 @@ def evaluate(
 
         with autocast():
             outputs = model(
-                vision_x=(input_image,image_mask),
+                vision_x=(input_image,image_mask,input_angle_feats),
                 lang_x=input_ids,
                 attention_mask=attention_mask,
                 labels=labels,
@@ -650,7 +655,12 @@ def evaluate(
         for bs in range(batch_size):
             data_type = batch_dict['data_type'][bs]
 
-            gt_action_index = (shift_labels[bs]!=-100).nonzero().view(-1)
+            # gt_action_index = (shift_labels[bs]!=-100).nonzero().view(-1)
+            gt_action_index = \
+                ((shift_labels[bs] <= args.action_token_ids[-1])
+                 & (shift_labels[bs] >= args.action_token_ids[0])
+                 ).nonzero().view(-1)
+
             gt_actions = shift_labels[bs][gt_action_index].detach().cpu().numpy()
             pred_actions = shift_preds[bs][gt_action_index].detach().cpu().numpy()
             assert ((gt_actions <= args.action_token_ids[-1]) &
@@ -687,6 +697,7 @@ def evaluate(
             logger.info(" - [{}] dataset: Pred/All = ({})/({}) = {:.2f}%".format(
                 k, results[k], results['{}_sum'.format(k)], (100*results[k]/(results['{}_sum'.format(k)]+1))
             ))
+
 
 
 
