@@ -610,6 +610,7 @@ class R2RDataset(torch_data.Dataset):
                     anno_file=_anno_file,
                     img_dir=self.config.LLaVa.DIR
                 )
+                msg += '\n- Dataset: load {} LLaVa samples'.format(len(self.data['llava']))
             else:
                 NotImplementedError
 
@@ -686,7 +687,7 @@ class R2RDataset(torch_data.Dataset):
         img_path = Path(img_path)
         if not img_path.exists():
             img = np.zeros((224, 224, 3), dtype=np.uint8)
-            raise NotImplementedError
+            # raise NotImplementedError
         else:
             img = cv2.imread(str(img_path))
 
