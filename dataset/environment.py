@@ -686,6 +686,7 @@ class R2RDataset(torch_data.Dataset):
         img_path = Path(img_path)
         if not img_path.exists():
             img = np.zeros((224, 224, 3), dtype=np.uint8)
+            raise NotImplementedError
         else:
             img = cv2.imread(str(img_path))
 
