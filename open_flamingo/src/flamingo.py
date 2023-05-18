@@ -249,6 +249,7 @@ class Flamingo(nn.Module):
 
         model_inputs = {"input_ids": input_ids}
 
+
         model_inputs.update(
             {
                 "past_key_values": past_key_values,
@@ -273,11 +274,11 @@ class Flamingo(nn.Module):
         #     token_type_ids = model_kwargs["token_type_ids"]
         #     model_kwargs["token_type_ids"] = torch.cat([token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
 
-        if "attention_mask" in model_kwargs:
-            attention_mask = model_kwargs["attention_mask"]
-            model_kwargs["attention_mask"] = torch.cat(
-                [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
-            )
+        # if "attention_mask" in model_kwargs:
+        #     attention_mask = model_kwargs["attention_mask"]
+        #     model_kwargs["attention_mask"] = torch.cat(
+        #         [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
+        #     )
 
 
         return model_kwargs
@@ -296,11 +297,7 @@ class Flamingo(nn.Module):
             max_length: int = 20,
             model_kwargs: dict = {},
     ):
-        import pdb;pdb.set_trace()
-        if 'attention_mask' not in model_kwargs:
-            model_kwargs['attention_mask'] = attention_mask
-        else:
-            model_kwargs['attention_mask'] = torch.cat([model_kwargs['attention_mask'],attention_mask],dim=1)
+        
         model_kwargs['use_cache'] = True
 
         output_attentions = False
@@ -318,6 +315,11 @@ class Flamingo(nn.Module):
 
         while True:
             # prepare model inputs
+            if 'attention_mask' not in model_kwargs:
+                model_kwargs['attention_mask'] = attention_mask
+            else:
+                model_kwargs['attention_mask'] = torch.cat([model_kwargs['attention_mask'], attention_mask],dim=1)
+
             model_inputs = self.prepare_inputs_for_generation(new_input_ids, **model_kwargs)
             # forward pass to get next token
             outputs = self.lang_encoder(
@@ -333,7 +335,8 @@ class Flamingo(nn.Module):
             # update generated ids, model inputs, and length for next step
             input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
             new_input_ids = next_tokens[:, None]
-            
+            attention_mask = attention_mask.new_ones((attention_mask.shape[0], 1))
+
             model_kwargs = self._update_model_kwargs_for_generation(
                 outputs, model_kwargs, is_encoder_decoder=False
             )

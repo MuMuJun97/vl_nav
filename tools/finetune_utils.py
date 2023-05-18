@@ -737,8 +737,8 @@ def inference(
             # TODO max step
             scan = batch_dict['scan'][0]
             vp = batch_dict['vp'][0]
-            all_vis_infos.extend(batch_dict['vis_infos'])
-            all_input_text += batch_dict['input_text']
+            all_vis_infos.extend(batch_dict['vis_infos'][0])
+            all_input_text += batch_dict['input_text'][0]
 
             input_image, image_mask, input_angle_feats = batch_process_image(
                 batch_image=batch_dict['input_image'],
@@ -774,7 +774,9 @@ def inference(
             action = tokenizer.decode(outputs[0, -1].item())
             batch_dict = r2r_dataset.make_equiv_action(scan, vp, action)
             import pdb;pdb.set_trace()
-
+            if action=='<stop>':
+                break
+        import pdb;pdb.set_trace()
 
 
 ###########################################################################################

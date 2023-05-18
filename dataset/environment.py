@@ -934,15 +934,31 @@ class R2RDataset(torch_data.Dataset):
         input_text += "\nAgent: <s>"
         return input_text, vis_infos, paths[-1]      
 
+    def get_valid_action(self, scan, vp, heading):
+        valid_view = self.compute_angle_features(
+            candidates=self.navigable_loc[scan][vp],
+            heading=heading,
+        )
+
     def make_equiv_action(self, scan, vp, action):
         if action == '<stop>':
-            return None
+            return {
+                'batch_size': 1,
+                'scan': [None],
+                'vp': [None],
+                'input_text': [action + '</s>'],
+                'vis_infos': [None],
+                'input_image': [None],
+                'input_angle_feats': [None],
+            }
         else:
             action_id = eval(action[7:-1]) # <walkto12>
             all_adj = self.navigable_loc[scan][vp]
             for k in all_adj:
+                next_scan = all_adj[k] # need comment
                 if all_adj[k]['pointId'] == action_id:
                     next_scan = all_adj[k]
+                    break
             assert next_scan is not None
             vp = next_scan['viewpointId']
             heading = next_scan['heading']
@@ -958,17 +974,15 @@ class R2RDataset(torch_data.Dataset):
             text += "\nAgent: <s>"
             vis_infos=[(scan, vp, valid_view)]
             input_image, input_angle_feats = self.get_vis(vis_infos)
-            input_image = [input_image]
-            input_angle_feats = [input_angle_feats]
 
             return {
                 'batch_size': 1,
-                'scan': scan,
-                'vp': vp,
-                'input_text': text,
-                'vis_infos': vis_infos,
-                'input_image': input_image,
-                'input_angle_feats': input_angle_feats,
+                'scan': [scan],
+                'vp': [vp],
+                'input_text': [text],
+                'vis_infos': [vis_infos],
+                'input_image': [input_image],
+                'input_angle_feats': [input_angle_feats],
             }
 
     def pre_process(self, index):
