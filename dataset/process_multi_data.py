@@ -271,6 +271,7 @@ def load_cvdn_data(anno_file, shortest_paths):
         new_item['instr_id'] = item['inst_idx']
         new_item['sample_idx'] = index
         new_item['target_object'] = item['target']
+        new_item['history_id'] = item['dialog_history'][-1]['nav_idx']
 
         # planner_goal = item['planner_path'][-1]
         # if planner_goal in item['player_path'][1:]:  # player walked through planner goal (did not start on it)
@@ -364,7 +365,7 @@ def load_cvdn_data(anno_file, shortest_paths):
         new_item['instruction'] = item['target']
 
         new_item['texts'] = texts
-        new_item['paths'] = paths
+        new_item['path'] = paths
 
         assert len(paths) < 20
 
@@ -617,6 +618,6 @@ if __name__ == '__main__':
     # 14039
     # reverie_data = load_reverie_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/REVERIE/REVERIE_train.json')
     # 10290
-    eqa_data = load_eqa_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/mp3d/mp3d_eqa_dict.json')
+    # eqa_data = load_eqa_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/mp3d/mp3d_eqa_dict.json')
  
     import pdb;pdb.set_trace()

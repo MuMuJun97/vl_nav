@@ -133,7 +133,6 @@ def generate_qa(
     input_text = prompt.format(text=text, tokenizer_eos_token=tokenizer_eos_token)
     return input_text
 
-
 def preprocess_soon(soon_file, navigable_loc):
     assert soon_file.exists()
     with open(str(soon_file), "r") as f:
@@ -305,7 +304,6 @@ def save_question_answer(res_data, type="fr2r"):
     qa_file = "data/{}_qa.json".format(type)
     with open(str(qa_file), 'w') as f:
         json.dump(all_qas, f, indent=2)
-
 
 def preprocess_fr2r(fr2r_file, navigable_loc):
     assert fr2r_file.exists()
@@ -563,7 +561,6 @@ def preprocess_fr2r(fr2r_file, navigable_loc):
         (len(stop_cases)/stop_sum),len(stop_cases),stop_sum
     ))
     return res_data,answers_type
-
 
 def generate_direction_from_mp3d(navigable_loc, mode="all"):
     item_idx = 0

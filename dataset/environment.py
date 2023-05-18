@@ -545,7 +545,7 @@ class R2RNavBatch(object):
 
 ############################### Dataset ###############################
 class R2RDataset(torch_data.Dataset):
-    def __init__(self, config, args, training=True, logger=None, image_processor=None, tokenizer=None):
+    def __init__(self, config, args, training=True, logger=None, image_processor=None, tokenizer=None, test=False):
         self.config = config
         self.split = args.split
         self.logger = logger
@@ -631,6 +631,18 @@ class R2RDataset(torch_data.Dataset):
 
         self.tokenizer = tokenizer
         self.image_processor = image_processor
+
+        self.input_text = []
+        self.vis_infos = []
+        self.last_vp = []
+        for index in range(len(self.alldata)):
+            if test:
+                input_text, vis_infos, last_vp = self.pre_process_test(index)
+            else:
+                input_text, vis_infos, last_vp = self.pre_process(index)
+            self.input_text.append(input_text)
+            self.vis_infos.append(vis_infos)
+            self.last_vp.append(last_vp)
 
         if logger is not None:
             logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
@@ -754,6 +766,22 @@ class R2RDataset(torch_data.Dataset):
             })
         return valid_view
 
+    def get_vis(self, vis_infos):
+        input_image = []
+        input_angle_feats = []
+        for (scan, vp, valid_view) in vis_infos:
+            images = self.load_images(scan, vp, valid_ids=list(valid_view.keys()))
+            input_image.append(images)
+
+            per_angle_feats = []
+            for k, v in valid_view.items():
+                per_angle_feats.append(v['angle_feats'])
+            input_angle_feats.append(torch.from_numpy(
+                np.stack(per_angle_feats)
+            ))
+        input_image = torch.cat(input_image, dim=0)
+        input_angle_feats = torch.cat(input_angle_feats, dim=0)
+        return input_image, input_angle_feats
 
     def load_multi_step_data(self, paths, texts, instruction, navigable_dict, scan,
                              tokenizer=None, item=None):
@@ -791,13 +819,18 @@ class R2RDataset(torch_data.Dataset):
 
         trajs = paths # T+1 steps
         history_text = ""
-        input_image = []
-        input_angle_feats = []
+        vis_infos = []
         heading = item['heading'] if item.get('heading', None) is not None else 0.
 
         trajs_len = len(trajs)
         for t, vp in enumerate(trajs):
             if vp is None:
+                if t in texts:
+                    for idx, text in enumerate(texts[t]):
+                        if idx % 2 == 0:
+                            history_text += "\nAgent: <s> {} </s>".format(text)
+                        else:
+                            history_text += "\nCommander: {}".format(text)
                 break
 
             # Vision:
@@ -810,16 +843,8 @@ class R2RDataset(torch_data.Dataset):
                 '<image{}>'.format(x, x) if x in valid_view.keys() else ''
                 for x in range(12)
             ])
-            
-            images = self.load_images(scan, vp, valid_ids=list(valid_view.keys()))
-            input_image.append(images)
 
-            per_angle_feats = []
-            for k, v in valid_view.items():
-                per_angle_feats.append(v['angle_feats'])
-            input_angle_feats.append(torch.from_numpy(
-                np.stack(per_angle_feats)
-            ))
+            vis_infos.append((scan, vp, valid_view))
 
             # Text:
             if t in texts:
@@ -846,50 +871,58 @@ class R2RDataset(torch_data.Dataset):
             history=history_text,
         )
 
-        input_image = torch.cat(input_image, dim=0)
-        input_angle_feats = torch.cat(input_angle_feats, dim=0)
+        return input_text, vis_infos
 
-        return input_text, input_image, input_angle_feats
+    def get_instruction(self, item):
+        data_type = item['data_type']
+        if data_type == 'r2r':
+            return 'Travel following the instruction, you can not ask for help. Instruction: ' \
+                + item['instruction']
+        elif data_type == 'soon':
+            return 'Find the described target, you can not ask for help. Target: ' \
+                + item['instruction']['instruction']
+        elif data_type == 'reverie':
+            return 'Go to the location to complete the given task, you can not ask for help. Task: ' \
+                + item['instruction']
+        elif data_type == 'eqa':
+            return 'Explore the scene and answer the question, you can not ask for help. Question: ' \
+                          + item['instruction']
+        elif data_type == 'cvdn':
+            return 'Find the described target, you can ask for help. Target: ' \
+                + item['instruction']
 
-    def __getitem__(self, index):
+    def get_gt_action(self, scan, loc_a, loc_b):
+        #TODO
+        if loc_a == loc_b:
+            return None
+        path = self.shortest_paths[item['scan']][loc_a][loc_b]
+        import pdb;pdb.set_trace()
+
+    def pre_process_test(self, index):
         item = self.alldata[index]
         scan = item['scan']
         data_type = item['data_type']
         texts = {}
+        instr_id = item['instr_id']
 
+        instruction = self.get_instruction(item)
         if data_type == 'r2r':
-            paths = item['path'] + [None]
-            instruction = 'Travel following the instruction, you can not ask for help. Instruction: ' \
-                + item['instruction']
-            instr_id = item['instr_id']
-
+            paths = item['path'][:1]
+     
         elif data_type == 'soon':
-            paths = item['path'] + [None]
-            instruction = 'Find the described target, you can not ask for help. Target: ' \
-                + item['instruction']['instruction']
-            instr_id = item['instr_id']
+            paths = item['path'][:1]
 
         elif data_type == 'reverie':
-            paths = item['path'] + [None]
-            instruction = 'Go to the location to complete the given task, you can not ask for help. Task: ' \
-                + item['instruction']
-            instr_id = item['instr_id']
+            paths = item['path'][:1]
 
         elif data_type == 'eqa':
-            paths = item['path']
-            instruction = 'Explore the scene and answer the question, you can not ask for help. Question: ' \
-                          + item['instruction']
-            instr_id = item['instr_id']
-            texts = item['texts']
+            paths = item['path'][:1]
 
         elif data_type == 'cvdn':
-            paths = item['paths'] + [None]
+            paths = item['path'][:item['history_id']+1]
             texts = item['texts']
-            instruction = 'Find the described target, you can ask for help. Target: ' \
-                + item['instruction']
-            instr_id = item['instr_id']
 
-        input_text, input_image, input_angle_feats \
+        input_text, vis_infos \
             = self.load_multi_step_data(
                 paths=paths,
                 texts=texts,
@@ -898,20 +931,106 @@ class R2RDataset(torch_data.Dataset):
                 scan=scan,
                 item=item,
             )
+        input_text += "\nAgent: <s>"
+        return input_text, vis_infos, paths[-1]      
 
-        data_dict = {
+    def make_equiv_action(self, scan, vp, action):
+        if action == '<stop>':
+            return None
+        else:
+            action_id = eval(action[7:-1]) # <walkto12>
+            all_adj = self.navigable_loc[scan][vp]
+            for k in all_adj:
+                if all_adj[k]['pointId'] == action_id:
+                    next_scan = all_adj[k]
+            assert next_scan is not None
+            vp = next_scan['viewpointId']
+            heading = next_scan['heading']
+            valid_view = self.compute_angle_features(
+                candidates=self.navigable_loc[scan][vp],
+                heading=heading,
+            )
+            text = action + '</s>'
+            text += "\nEnvironment: " + "".join([
+                '<image{}>'.format(x, x) if x in valid_view.keys() else ''
+                for x in range(12)
+            ])
+            text += "\nAgent: <s>"
+            vis_infos=[(scan, vp, valid_view)]
+            input_image, input_angle_feats = self.get_vis(vis_infos)
+            input_image = [input_image]
+            input_angle_feats = [input_angle_feats]
+
+            return {
+                'batch_size': 1,
+                'scan': scan,
+                'vp': vp,
+                'input_text': text,
+                'vis_infos': vis_infos,
+                'input_image': input_image,
+                'input_angle_feats': input_angle_feats,
+            }
+
+    def pre_process(self, index):
+        item = self.alldata[index]
+        scan = item['scan']
+        data_type = item['data_type']
+        texts = {}
+        instr_id = item['instr_id']
+        instruction = self.get_instruction(item)
+        paths = item['path'] + [None]
+
+        if data_type == 'eqa':
+            # TODO validate correctness
+            texts = {k+1:v for k,v in item['texts'].items()}
+
+        if data_type == 'cvdn':
+            texts = item['texts']
+
+        input_text, vis_infos \
+            = self.load_multi_step_data(
+                paths=paths,
+                texts=texts,
+                instruction=instruction,
+                navigable_dict=self.navigable_loc[scan],
+                scan=scan,
+                item=item,
+            )
+        return input_text, vis_infos, paths[-1]
+
+    def update_data(self, index, input_text, vis_infos):
+        pass
+
+    def __getitem__(self, index):
+        item = self.alldata[index]
+        scan = item['scan']
+        data_type = item['data_type']
+        instr_id = item['instr_id']
+        instruction = self.get_instruction(item)
+        gt_paths = item['path']
+
+        input_text, vis_infos, last_vp = self.input_text[index], self.vis_infos[index], self.last_vp[index]
+
+        input_image, input_angle_feats = self.get_vis(vis_infos)
+
+        return {
             'data_type': data_type, # 'r2r' 'soon' ...
             'sample_idx': index,
             'instr_id': instr_id,
             'scan': scan,
-            'paths': paths,
+            'vp': last_vp,
+            'gt_paths': gt_paths,
             'instruction': instruction,
             'input_text': input_text,
+            'vis_infos': vis_infos,
             'input_image': input_image,
             'input_angle_feats': input_angle_feats,
         }
+    
+    def __getrawitem__(self, index):
+        return self.alldata[index]
 
-        return data_dict
+
 
     @staticmethod
     def collate_batch(batch_list, _unused=False):

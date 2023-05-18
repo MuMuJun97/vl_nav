@@ -159,79 +159,10 @@ class Flamingo(nn.Module):
                 labels=labels,
                 use_cached_vision_x=use_cached_vision_x,
                 clear_conditioned_layers=clear_conditioned_layers,
-                past_key_values=past_key_values,
-                use_cache=use_cache,
                 use_local_vision=use_local_vision,
                 max_length=max_length,
             )
             return output_ids
-
-    def generate(
-        self,
-        vision_x: torch.Tensor,
-        lang_x: torch.Tensor,
-        attention_mask: torch.Tensor = None,
-        num_beams=1,
-        max_new_tokens=None,
-        temperature=1.0,
-        top_k=0,
-        top_p=1.0,
-        no_repeat_ngram_size=0,
-        prefix_allowed_tokens_fn=None,
-        length_penalty=1.0,
-        num_return_sequences=1,
-        do_sample=False,
-        early_stopping=False,
-    ):
-        """
-        Generate text conditioned on vision and language inputs.
-
-        Args:
-            vision_x (torch.Tensor): Vision input
-                shape (B, T_img, F, C, H, W)
-                images in the same chunk are collated along T_img, and frames are collated along F
-                currently only F=1 is supported (single-frame videos)
-            lang_x (torch.Tensor): Language input
-                shape (B, T_txt)
-            max_length (int, optional): Maximum length of the output. Defaults to None.
-            attention_mask (torch.Tensor, optional): Attention mask. Defaults to None.
-            num_beams (int, optional): Number of beams. Defaults to 1.
-            max_new_tokens (int, optional): Maximum new tokens. Defaults to None.
-            temperature (float, optional): Temperature. Defaults to 1.0.
-            top_k (int, optional): Top k. Defaults to 0.
-            top_p (float, optional): Top p. Defaults to 1.0.
-            no_repeat_ngram_size (int, optional): No repeat ngram size. Defaults to 0.
-            length_penalty (float, optional): Length penalty. Defaults to 1.0.
-            num_return_sequences (int, optional): Number of return sequences. Defaults to 1.
-            do_sample (bool, optional): Do sample. Defaults to False.
-            early_stopping (bool, optional): Early stopping. Defaults to False.
-        Returns:
-            torch.Tensor: lang_x with generated tokens appended to it
-        """
-        if num_beams > 1:
-            vision_x = vision_x.repeat_interleave(num_beams, dim=0)
-
-        self._encode_vision_x(vision_x=vision_x)
-
-        output = self.lang_encoder.generate(
-            lang_x,
-            attention_mask=attention_mask,
-            eos_token_id=self.eoc_token_id,
-            num_beams=num_beams,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
-            no_repeat_ngram_size=no_repeat_ngram_size,
-            length_penalty=length_penalty,
-            num_return_sequences=num_return_sequences,
-            do_sample=do_sample,
-            early_stopping=early_stopping,
-        )
-
-        self.lang_encoder.clear_conditioned_layers()
-        return output
 
     def _encode_vision_with_local(self, vision_x: torch.Tensor):
         """
@@ -315,14 +246,8 @@ class Flamingo(nn.Module):
     def prepare_inputs_for_generation(
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
     ):
-        if past_key_values:
-            input_ids = input_ids[:, -1:]
 
-        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
-            model_inputs = {"inputs_embeds": inputs_embeds}
-        else:
-            model_inputs = {"input_ids": input_ids}
+        model_inputs = {"input_ids": input_ids}
 
         model_inputs.update(
             {
@@ -343,21 +268,17 @@ class Flamingo(nn.Module):
         # update past_key_values
         model_kwargs["past_key_values"] = outputs.past_key_values
 
-        # update token_type_ids with last value
-        if "token_type_ids" in model_kwargs:
-            token_type_ids = model_kwargs["token_type_ids"]
-            model_kwargs["token_type_ids"] = torch.cat([token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
+        # # update token_type_ids with last value
+        # if "token_type_ids" in model_kwargs:
+        #     token_type_ids = model_kwargs["token_type_ids"]
+        #     model_kwargs["token_type_ids"] = torch.cat([token_type_ids, token_type_ids[:, -1].unsqueeze(-1)], dim=-1)
 
-        if not is_encoder_decoder:
-            # update attention mask
-            if "attention_mask" in model_kwargs:
-                attention_mask = model_kwargs["attention_mask"]
-                model_kwargs["attention_mask"] = torch.cat(
-                    [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
-                )
-        else:
-            # update decoder attention mask
-            raise NotImplementedError
+        if "attention_mask" in model_kwargs:
+            attention_mask = model_kwargs["attention_mask"]
+            model_kwargs["attention_mask"] = torch.cat(
+                [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
+            )
+
 
         return model_kwargs
 
@@ -373,30 +294,31 @@ class Flamingo(nn.Module):
             use_cache: bool = False,
             use_local_vision: str = 'none',
             max_length: int = 20,
+            model_kwargs: dict = {},
     ):
-        model_kwargs = {
-            'attention_mask': attention_mask,
-            'use_cache': True,
-        }
+        import pdb;pdb.set_trace()
+        if 'attention_mask' not in model_kwargs:
+            model_kwargs['attention_mask'] = attention_mask
+        else:
+            model_kwargs['attention_mask'] = torch.cat([model_kwargs['attention_mask'],attention_mask],dim=1)
+        model_kwargs['use_cache'] = True
+
         output_attentions = False
         output_hidden_states = False
         scores = None
         max_length += input_ids.shape[-1]
 
-        self._encode_vision_x(vision_x=vision_x)
+        self.encode_image_with_mask(vision_x=vision_x)
 
         pad_token_id = self.lang_encoder.generation_config.pad_token_id
         eos_token_id = self.eoc_token_id # STOP Token
         if isinstance(eos_token_id, int):
             eos_token_id = [eos_token_id]
-        eos_token_id_tensor = torch.tensor(eos_token_id).to(input_ids.device) if eos_token_id is not None else None
-
-        # keep track of which sequences are already finished
-        unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
+        new_input_ids = input_ids
 
         while True:
             # prepare model inputs
-            model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+            model_inputs = self.prepare_inputs_for_generation(new_input_ids, **model_kwargs)
             # forward pass to get next token
             outputs = self.lang_encoder(
                 **model_inputs,
@@ -405,39 +327,24 @@ class Flamingo(nn.Module):
                 output_hidden_states=output_hidden_states,
             )
 
-            next_token_logits = outputs.logits[:, -1, :]
-            next_tokens_scores = next_token_logits
-
-            # argmax
+            next_tokens_scores = outputs.logits[:, -1, :]
             next_tokens = torch.argmax(next_tokens_scores, dim=-1)
-
-            # finished sentences should have their next token be a padding token
-            if eos_token_id is not None:
-                if pad_token_id is None:
-                    raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
-                next_tokens = next_tokens * unfinished_sequences + pad_token_id * (1 - unfinished_sequences)
 
             # update generated ids, model inputs, and length for next step
             input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
-
+            new_input_ids = next_tokens[:, None]
+            
             model_kwargs = self._update_model_kwargs_for_generation(
                 outputs, model_kwargs, is_encoder_decoder=False
             )
 
-            # if eos_token was found in one sentence, set sentence to finished
-            if eos_token_id_tensor is not None:
-                # torch.ne: not equal
-                unfinished_sequences = unfinished_sequences.mul(
-                    next_tokens.tile(eos_token_id_tensor.shape[0], 1).ne(eos_token_id_tensor.unsqueeze(1)).prod(dim=0)
-                )
-
             # stop when each sentence is finished, or if we exceed the maximum length
-            if unfinished_sequences.max() == 0 or input_ids.shape[-1] >= max_length:
+            if next_tokens[0] in eos_token_id or input_ids.shape[-1] >= max_length:
                 break
 
         self.lang_encoder.clear_conditioned_layers()
 
-        return input_ids
+        return input_ids, model_kwargs
 
     def encode_image_with_mask(self, vision_x):
         """

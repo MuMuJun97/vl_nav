@@ -700,6 +700,81 @@ def evaluate(
 
 
 
+@torch.no_grad()
+def inference(
+    args, model, r2r_dataset, r2r_dataloader, tokenizer, device_id, logger=None
+):
+    model.eval()
+    loss_metric = Metrics()
+    autocast = get_autocast(args.precision)
+    cast_dtype = get_cast_dtype(args.precision)
+
+    num_batches_per_epoch = r2r_dataloader.num_batches
+    total_training_steps = num_batches_per_epoch * 1 # args.num_epochs
+
+    results = {
+        'r2r': 0, 'r2r_sum': 0,
+        'cvdn': 0, 'cvdn_sum': 0,
+        'soon': 0, 'soon_sum': 0,
+        'reverie': 0, 'reverie_sum': 0,
+        'true': 0, 'all': 0,
+    }
+
+    pbar = tqdm(
+        enumerate(r2r_dataloader),
+        disable=args.rank!=0,
+        total=total_training_steps,
+        initial=(0 * num_batches_per_epoch)
+    )
+    for num_steps, batch_dict in pbar:
+        batch_size = batch_dict['batch_size']
+        assert batch_size == 1
+        all_input_text = ""
+        all_vis_infos = []
+        model_kwargs = {}
+
+        while True:
+            # TODO max step
+            scan = batch_dict['scan'][0]
+            vp = batch_dict['vp'][0]
+            all_vis_infos.extend(batch_dict['vis_infos'])
+            all_input_text += batch_dict['input_text']
+
+            input_image, image_mask, input_angle_feats = batch_process_image(
+                batch_image=batch_dict['input_image'],
+                batch_size=batch_size,
+                batch_angle_feats=batch_dict['input_angle_feats']
+            )
+            input_image = input_image.to(device_id, dtype=cast_dtype, non_blocking=True)
+            input_angle_feats = input_angle_feats.to(device_id, dtype=cast_dtype, non_blocking=True)
+
+            input_ids, attention_mask, labels, image_mask = \
+                batch_process_text(
+                    batch_dict=batch_dict,
+                    tokenizer=tokenizer,
+                    max_length=args.max_length,
+                    args=args,
+                    image_mask=image_mask,
+                )
+            image_mask = image_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
+            input_ids = input_ids.to(device_id, dtype=cast_dtype, non_blocking=True)
+            attention_mask = attention_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
+            labels = labels.to(device_id, dtype=cast_dtype, non_blocking=True)
+
+            with autocast():
+                # TODO candidate action set
+                # TODO EQA: ban action
+                # TODO cand_action = r2r_dataset.get_valid_action()
+                outputs, model_kwargs = model.greedy_inference(
+                    vision_x=(input_image,image_mask,input_angle_feats),
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    model_kwargs=model_kwargs,
+                )
+            action = tokenizer.decode(outputs[0, -1].item())
+            batch_dict = r2r_dataset.make_equiv_action(scan, vp, action)
+            import pdb;pdb.set_trace()
+
 
 
 ###########################################################################################

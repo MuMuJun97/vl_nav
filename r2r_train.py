@@ -98,6 +98,7 @@ def main():
         image_processor=image_processor,
         tokenizer=tokenizer,
     )
+    import pdb;pdb.set_trace()
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
         args=args,
