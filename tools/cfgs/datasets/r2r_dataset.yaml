@@ -6,7 +6,7 @@ Dataset:
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['R2R', 'CVDN', 'SOON', 'REVERIE', 'EQA'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN"
+  SOURCE: ['R2R', 'CVDN', 'SOON', 'REVERIE', 'LLaVa', 'EQA'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN" , 'LLaVa'
   SOON:
     DIR: "data/SOON/annotations/iccv21_new_released" # train.json
     SPLIT: {
@@ -54,6 +54,9 @@ Dataset:
       "val_unseen": "val_unseen.json",
       "test": "test_cleaned.json"
     }
+
+  LLaVa:
+    DIR: "/mnt/petrelfs/zhaolin/vln/nav/features/train2014/COCO_train2014_{image}"
 
   Img_Features_File_Map: {
     # from HM3D-AutoVLN

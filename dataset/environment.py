@@ -25,7 +25,8 @@ from dataset.process_multi_data import (
     load_fr2r_data,load_reverie_data,
     generate_data_indexs,
     generate_graphs,load_nav_graphs,
-    load_eqa_data, load_cvdn_data
+    load_eqa_data, load_cvdn_data,
+    load_llava_data
 )
 
 def new_simulator(connectivity_dir):
@@ -603,6 +604,12 @@ class R2RDataset(torch_data.Dataset):
                 _anno_file = _root_dir/config.CVDN.DIR/config.CVDN.SPLIT[self.split]
                 self.data['cvdn'] = load_cvdn_data(anno_file=_anno_file, shortest_paths=self.shortest_paths)
                 msg += '\n- Dataset: load {} CVDN samples'.format(len(self.data['cvdn']))
+            elif source == "LLaVa":
+                _anno_file = _root_dir/'build/LLaVa/{}.json'.format(self.split)
+                self.data['llava'] = load_llava_data(
+                    anno_file=_anno_file,
+                    img_dir=self.config.LLaVa.DIR
+                )
             else:
                 NotImplementedError
 
@@ -611,6 +618,9 @@ class R2RDataset(torch_data.Dataset):
         del self.data
 
         self.scans = set([x['scan'] for x in self.alldata])
+        if '' in self.scans:
+            self.scans.remove('')
+
         msg += '\n- Dataset: load {} split: {} scans in total'.format(self.split, len(self.scans))
 
         # MP3D Connectivity Graph
@@ -671,6 +681,26 @@ class R2RDataset(torch_data.Dataset):
 
     def __len__(self):
         return len(self.alldata)
+
+    def load_coco_image(self, img_path):
+        img_path = Path(img_path)
+        if not img_path.exists():
+            img = np.zeros((224, 224, 3), dtype=np.uint8)
+        else:
+            img = cv2.imread(str(img_path))
+
+        images = [self.image_processor(
+                Image.fromarray(
+                    img[:, :, ::-1]  # BRG2RGB
+                )
+            ).unsqueeze(0)]
+        images = torch.cat(images, dim=0)
+        if self.training:
+            # apply random horizontal flip and color jitter
+            images = torchvision.transforms.RandomHorizontalFlip(p=0.5)(images)
+            images = torchvision.transforms.ColorJitter(brightness=0.5, hue=0.3)(images)
+
+        return images
 
     def load_images(self, scan, vp, valid_ids=None):
         img_file = self.img_dir / scan / '{}_{}.png'.format(scan, vp)
@@ -756,7 +786,7 @@ class R2RDataset(torch_data.Dataset):
 
 
     def load_multi_step_data(self, paths, texts, instruction, navigable_dict, scan,
-                             tokenizer=None, item=None):
+                             tokenizer=None, item=None, img_path=None):
         """
         Args:
             paths: [start_viewpoint, ..., end_viewpoint]
@@ -840,14 +870,23 @@ class R2RDataset(torch_data.Dataset):
                     history_text += "\nAgent: <s><walkto{}></s>".format(next_view_id)
                     heading = (next_view_id % 12) * math.radians(30)
 
-        input_text = prompt.format(
-            task_description=task_description,
-            instruction=instruction,
-            history=history_text,
-        )
+        if scan == '':
+            # for LLaVa Instruct
+            input_text = "{instruction}\n" \
+                         "Environment: <image0>\n" \
+                         "Agent: <s>{answer}</s>".format(
+                instruction=instruction, answer=texts)
+            input_image = self.load_coco_image(img_path)
+            input_angle_feats = torch.zeros((1,2))
+        else:
+            input_text = prompt.format(
+                task_description=task_description,
+                instruction=instruction,
+                history=history_text,
+            )
 
-        input_image = torch.cat(input_image, dim=0)
-        input_angle_feats = torch.cat(input_angle_feats, dim=0)
+            input_image = torch.cat(input_image, dim=0)
+            input_angle_feats = torch.cat(input_angle_feats, dim=0)
 
         return input_text, input_image, input_angle_feats
 
@@ -889,14 +928,28 @@ class R2RDataset(torch_data.Dataset):
                 + item['instruction']
             instr_id = item['instr_id']
 
+        elif data_type == 'llava':
+            paths = [None]
+            assert item['instructions'][1]['from'] == 'gpt' \
+                   and item['instructions'][0]['from'] == 'human' \
+                   and '<image>' in item['instructions'][0]['value']
+            human_instr = item['instructions'][0]['value'].replace(
+                "<image>", "",
+            ).replace("\n", "")
+            instruction = 'Answer the question based on the image, you can not ask for help. Question: ' \
+                + human_instr
+            texts = item['instructions'][1]['value']
+            instr_id = item['instr_id']
+
         input_text, input_image, input_angle_feats \
             = self.load_multi_step_data(
                 paths=paths,
                 texts=texts,
                 instruction=instruction,
-                navigable_dict=self.navigable_loc[scan],
+                navigable_dict=self.navigable_loc[scan] if data_type != 'llava' else None,
                 scan=scan,
                 item=item,
+                img_path=item['image_path'] if data_type == 'llava' else None,
             )
 
         data_dict = {

@@ -377,6 +377,22 @@ def load_cvdn_data(anno_file, shortest_paths):
     return new_data
 
 
+def load_llava_data(anno_file, img_dir):
+    with open(anno_file, "r") as f:
+        data = json.load(f)
+    new_data = []
+    for idx, item in enumerate(data):
+        new_item = dict(item)
+        new_item['image_path'] = img_dir.format(
+            image=item['image']
+        )
+        new_item['data_type'] = 'llava'
+        new_item['scan'] = ''
+        new_item['instr_id'] = str(idx)
+        new_data.append(new_item)
+    return new_data
+
+
 def generate_data_indexs(data):
     start_index = 0
     end_index = 0
@@ -411,6 +427,11 @@ def generate_data_indexs(data):
         alldata += data['cvdn']
         end_index += len(data['cvdn'])
         all_index.update({i: 'cvdn' for i in range(start_index, end_index)})
+        start_index += len(data['cvdn'])
+    if 'llava' in data.keys():
+        alldata += data['llava']
+        end_index += len(data['llava'])
+        all_index.update({i: 'llava' for i in range(start_index, end_index)})
     return alldata, all_index
 
 

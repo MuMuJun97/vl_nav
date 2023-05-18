@@ -574,6 +574,23 @@ def train_one_epoch(
     return global_step
 
 
+def collect_pred_actions(batch_dict, batch_preds, rank, pred_dict):
+    for bs in range(len(batch_preds)):
+        key = '{}_{}'.format(
+            batch_dict['data_type'][bs],
+            batch_dict['instr_id'][bs]
+        )
+        if pred_dict.get(key, None) is None:
+            pred_dict[key] = dict()
+        pred_dict[key]['input_text'] = batch_dict['input_text'][bs]
+        pred_dict[key]['pred_text'] = batch_preds[bs]
+
+    all_pred_dict = all_gather(pred_dict)
+    if rank == 0:
+        for per_results in all_pred_dict:
+            for k, v in per_results.items():
+                pred_dict[k] = v
+
 @torch.no_grad()
 def evaluate(
     args, model, r2r_dataset, r2r_dataloader, tokenizer, device_id, logger=None
@@ -600,6 +617,9 @@ def evaluate(
         total=total_training_steps,
         initial=(0 * num_batches_per_epoch)
     )
+
+    pred_dict = {}
+
     for num_steps, batch_dict in pbar:
         batch_size = batch_dict['batch_size']
 
@@ -652,6 +672,7 @@ def evaluate(
             'true': 0, 'all': 0,
         }
 
+        pred_acts = []
         for bs in range(batch_size):
             data_type = batch_dict['data_type'][bs]
 
@@ -660,6 +681,11 @@ def evaluate(
                 ((shift_labels[bs] <= args.action_token_ids[-1])
                  & (shift_labels[bs] >= args.action_token_ids[0])
                  ).nonzero().view(-1)
+
+            # views_locs = (input_ids[bs] >= 32001) & (input_ids[bs] <= 32012)
+            # action_locs = (input_ids[bs] >= args.action_token_ids[0]) & (input_ids[bs] <= args.action_token_ids[-1])
+            # view_action_locs = views_locs | action_locs
+            # view_actions_pairs = input_ids[bs,view_action_locs]
 
             gt_actions = shift_labels[bs][gt_action_index].detach().cpu().numpy()
             pred_actions = shift_preds[bs][gt_action_index].detach().cpu().numpy()
@@ -670,6 +696,16 @@ def evaluate(
             sample_results['all'] += gt_actions.shape[0]
             sample_results[data_type] += (pred_actions == gt_actions).sum()
             sample_results['{}_sum'.format(data_type)] += gt_actions.shape[0]
+
+            pred_acts.append(pred_actions)
+
+        # collect pred actions
+        collect_pred_actions(
+            batch_dict=batch_dict,
+            batch_preds=tokenizer.batch_decode(pred_acts),
+            rank=args.rank,
+            pred_dict=pred_dict
+        )
 
         batch_results = all_gather(sample_results)
         if args.rank == 0:
@@ -698,7 +734,16 @@ def evaluate(
                 k, results[k], results['{}_sum'.format(k)], (100*results[k]/(results['{}_sum'.format(k)]+1))
             ))
 
-
+        from pathlib import Path
+        import datetime
+        import json
+        val_pred_file = Path(args.run_name) / (
+            '{}_pred_{}.json'.format(
+                args.split,
+                datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+            ))
+        with open(str(val_pred_file), 'w') as f:
+            json.dump(pred_dict, f, indent=2)
 
 
 

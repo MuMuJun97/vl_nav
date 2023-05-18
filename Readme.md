@@ -1,3 +1,13 @@
+# LLaVa-Instruct-SubSet
+```shell
+# install data to build/LLaVa/
+wget https://huggingface.co/datasets/LinZhao/LLaVA-Instruct-21K-COCO-SubSet/resolve/main/train.json
+wget https://huggingface.co/datasets/LinZhao/LLaVA-Instruct-21K-COCO-SubSet/resolve/main/val_seen.json
+wget https://huggingface.co/datasets/LinZhao/LLaVA-Instruct-21K-COCO-SubSet/resolve/main/val_unseen.json
+wget https://huggingface.co/datasets/LinZhao/LLaVA-Instruct-21K-COCO-SubSet/resolve/main/test.json
+```
+
+
 # Matterport3D Navigation Dataset
 
 ## Instruction Generation on Matterport3D
