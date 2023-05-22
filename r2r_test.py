@@ -115,10 +115,8 @@ def main():
     total_gpus = torch.cuda.device_count()
     device_id = args.rank % total_gpus
     model = model.to(device_id)
-    optimizer = torch.optim.AdamW(get_grouped_params(model, args), lr=args.learning_rate)
-    lr_scheduler = get_constant_schedule_with_warmup(
-        optimizer, num_warmup_steps=args.warmup_steps
-    )
+    optimizer = None
+    lr_scheduler = None
 
     resume_from_epoch = 0
     # TODO : check if a checkpoint exists for this run

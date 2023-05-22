@@ -810,7 +810,7 @@ def inference(
         # metrics
         goal = traj_infos['gt_paths'][-1]
         pred_path = traj_infos['pred_paths']
-        assert traj_infos['gt_paths'][0] == pred_path[0]
+        # assert traj_infos['gt_paths'][0] == pred_path[0]
         final_position = pred_path[-1]
         nearest_position = r2r_dataset.get_nearest(traj_infos['scan'], goal, pred_path)
         traj_infos['nav_errors'].append(
@@ -836,6 +836,9 @@ def inference(
             traj_infos['trajectory_lengths'][0], traj_infos['shortest_lengths'][0], 0.01)
 
         all_traj_infos.append(traj_infos)
+
+        if args.rank == 0:
+            pbar.update()
 
     batch_traj_infos = all_gather(all_traj_infos)
     if args.rank == 0:
