@@ -562,7 +562,7 @@ class R2RDataset(torch_data.Dataset):
             mp3d_scans = f.readlines()
         mp3d_scans = [s.strip() for s in mp3d_scans]
 
-        _, self.shortest_paths = generate_graphs(
+        _, self.shortest_paths, self.shortest_distances = generate_graphs(
             graph_dict_file=graph_dict_file,
             rank=args.rank,
             logger=logger,
@@ -950,15 +950,19 @@ class R2RDataset(torch_data.Dataset):
                 'vis_infos': [None],
                 'input_image': [None],
                 'input_angle_feats': [None],
+                'action': None,
             }
         else:
             action_id = eval(action[7:-1]) # <walkto12>
             all_adj = self.navigable_loc[scan][vp]
+            next_scan_dis = 1e+5
             for k in all_adj:
+                if k == vp:
+                    continue
                 next_scan = all_adj[k] # need comment
-                if all_adj[k]['pointId'] == action_id:
+                if all_adj[k]['pointId'] == action_id and all_adj[k]['distance'] < next_scan_dis:
+                    next_scan_dis = all_adj[k]['distance']
                     next_scan = all_adj[k]
-                    break
             assert next_scan is not None
             vp = next_scan['viewpointId']
             heading = next_scan['heading']
@@ -983,7 +987,21 @@ class R2RDataset(torch_data.Dataset):
                 'vis_infos': [vis_infos],
                 'input_image': [input_image],
                 'input_angle_feats': [input_angle_feats],
+                'action': action_id,
             }
+
+    def get_nearest(self, scan, goal_id, path):
+        near_id = path[0]
+        near_d = self.shortest_distances[scan][near_id][goal_id]
+        for item in path:
+            d = self.shortest_distances[scan][item][goal_id]
+            if d < near_d:
+                near_id = item
+                near_d = d
+        return near_id
+
+    def get_distance(self, scan, position, goal):
+        return self.shortest_distances[scan][position][goal]
 
     def pre_process(self, index):
         item = self.alldata[index]

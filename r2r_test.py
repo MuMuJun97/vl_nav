@@ -51,6 +51,7 @@ def main():
     global_cfg.Dataset.Object_Features_File_Map = global_cfg.Dataset.Object_Features_File_Map[args.obj_feats]
     args.enable_imgdataset = False if global_cfg.Dataset.get('IMG_DIR',None) is None else True
     args.max_length = global_cfg.Dataset.tokenizer.max_length
+    args.max_action_len = global_cfg.Agent.max_action_len
 
     device_id = init_distributed_device(args)  # TODO multi-GPU training.
 

@@ -4,6 +4,7 @@ from torch import nn
 from transformers.utils import ModelOutput
 from typing import Any, Dict, List, Optional, Tuple, Union
 from .helpers import PerceiverResampler
+import torch.nn.functional as F
 
 
 class Flamingo(nn.Module):
@@ -296,6 +297,7 @@ class Flamingo(nn.Module):
             use_local_vision: str = 'none',
             max_length: int = 20,
             model_kwargs: dict = {},
+            candidates: torch.Tensor = None,
     ):
         
         model_kwargs['use_cache'] = True
@@ -309,6 +311,7 @@ class Flamingo(nn.Module):
 
         pad_token_id = self.lang_encoder.generation_config.pad_token_id
         eos_token_id = self.eoc_token_id # STOP Token
+        eos_token_id = [eos_token_id[0]] + eos_token_id[-13:] # </s> + <walkto0>...<walkto11><stop>
         if isinstance(eos_token_id, int):
             eos_token_id = [eos_token_id]
         new_input_ids = input_ids
@@ -330,7 +333,14 @@ class Flamingo(nn.Module):
             )
 
             next_tokens_scores = outputs.logits[:, -1, :]
-            next_tokens = torch.argmax(next_tokens_scores, dim=-1)
+            if candidates is not None:
+                # candidates: <walkto{?}> + <stop>
+                next_action_scores = torch.index_select(next_tokens_scores, -1, candidates)
+                next_action_log_probs = F.softmax(next_action_scores, dim=-1)
+                next_tokens = torch.argmax(next_action_log_probs, dim=-1)
+                next_tokens = candidates[next_tokens]
+            else:
+                next_tokens = torch.argmax(next_tokens_scores, dim=-1)
 
             # update generated ids, model inputs, and length for next step
             input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)

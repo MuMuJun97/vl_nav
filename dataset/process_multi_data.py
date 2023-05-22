@@ -457,7 +457,7 @@ def save_graphs(graph_dict_file_, connectivity_dir_, scans_, logger_):
     with open(str(graph_dict_file_), "wb") as f:
         pickle.dump(graph_dict_, f)
     logger_.info('Save graph dict to: {}'.format(graph_dict_file_)) if logger_ is not None else None
-    return graphs_, shortest_paths_
+    return graphs_, shortest_paths_, shortest_distances
 
 
 def generate_graphs(graph_dict_file, rank, logger, connectivity_dir, scans):
@@ -469,6 +469,7 @@ def generate_graphs(graph_dict_file, rank, logger, connectivity_dir, scans):
             logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
         graphs = graph_dict['graphs']
         shortest_paths = graph_dict['shortest_paths']
+        shortest_distances = graph_dict['shortest_distances']
         del graph_dict
     else:
         if graph_dict_file.exists():
@@ -477,7 +478,7 @@ def generate_graphs(graph_dict_file, rank, logger, connectivity_dir, scans):
                 logger.info('Load graph dict: {}'.format(graph_dict_file)) if logger is not None else None
             scans_ = graph_dict.get('scans', None)
             if scans_ is None or sorted(scans_) != sorted(scans):
-                graphs, shortest_paths = save_graphs(
+                graphs, shortest_paths, shortest_distances = save_graphs(
                     graph_dict_file,
                     connectivity_dir,
                     scans,
@@ -486,19 +487,20 @@ def generate_graphs(graph_dict_file, rank, logger, connectivity_dir, scans):
             else:
                 graphs = graph_dict['graphs']
                 shortest_paths = graph_dict['shortest_paths']
+                shortest_distances = graph_dict['shortest_distances']
             del graph_dict
         else:
-            graphs, shortest_paths = save_graphs(
+            graphs, shortest_paths, shortest_distances = save_graphs(
                 graph_dict_file,
                 connectivity_dir,
                 scans,
                 logger
             )
-    return None, shortest_paths
+    return None, shortest_paths, shortest_distances
 
 
 ###################### Dataset: Load Multi-Step Vision-Language Data ######################
-def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
+def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extract_candidates=None):
     """
     Args:
         batch_dict:
@@ -506,6 +508,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
         max_length: 512
         args:
         image_mask:
+        extract_candidates:
     Returns:
         input_ids:
         attention_mask:
@@ -556,6 +559,26 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask):
             labels[bs, loc_a+1: loc_b+1] = input_ids[bs, loc_a+1: loc_b+1]
         # only compute loss on: #Answer:<walkto{view_id}>
         # labels[bs,answer_locs] = input_ids[bs,answer_locs]
+
+    # generate: find the candidate action set
+    if extract_candidates is not None:
+        assert batch_size == 1
+        media_locs = torch.where(media_locations == True)[1]
+        loc_diff = torch.diff(media_locs)
+        st_loc = torch.where(loc_diff > 1)[0]
+        if len(st_loc) == 0:
+            st_loc = media_locs[0]
+        else:
+            st_loc =  st_loc[-1] + 1
+            st_loc = media_locs[st_loc]
+        end_loc = media_locs[-1]
+        # <image0> + 12 --> <walkto0>
+        candidates = input_ids[0, st_loc:end_loc+1] + 12
+        # add <stop>
+        candidates = torch.cat([candidates, torch.tensor([32025])])
+
+        return input_ids, batch_text['attention_mask'], labels, image_mask, candidates
+
     return input_ids, batch_text['attention_mask'], labels, image_mask
 
 

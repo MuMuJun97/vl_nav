@@ -717,8 +717,12 @@ def inference(
         'cvdn': 0, 'cvdn_sum': 0,
         'soon': 0, 'soon_sum': 0,
         'reverie': 0, 'reverie_sum': 0,
+        'eqa': 0, 'eqa_sum': 0,
         'true': 0, 'all': 0,
     }
+    all_traj_infos = []
+    result_infos = []
+    error_margin = 3.0
 
     pbar = tqdm(
         enumerate(r2r_dataloader),
@@ -733,163 +737,139 @@ def inference(
         all_vis_infos = []
         model_kwargs = {}
 
-        while True:
-            # TODO max step
+        ############### Init ###############
+        ended = np.array([False] * batch_size)
+        traj_infos = {
+            'data_type': batch_dict['data_type'][0],
+            'instr_id': batch_dict['instr_id'][0],
+            'gt_paths': batch_dict['gt_paths'][0],
+            'pred_paths': [batch_dict['vp'][0]],
+            'scan': batch_dict['scan'][0],
+            'nav_errors': [],
+            'oracle_errors': [],
+            'trajectory_steps': [],
+            'trajectory_lengths': [],
+            'shortest_lengths': []
+        }
+        all_input_text += batch_dict['input_text'][0]
+
+        for t in range(args.max_action_len):
             scan = batch_dict['scan'][0]
             vp = batch_dict['vp'][0]
-            all_vis_infos.extend(batch_dict['vis_infos'][0])
-            all_input_text += batch_dict['input_text'][0]
 
-            input_image, image_mask, input_angle_feats = batch_process_image(
-                batch_image=batch_dict['input_image'],
-                batch_size=batch_size,
-                batch_angle_feats=batch_dict['input_angle_feats']
-            )
+            input_image, image_mask, input_angle_feats \
+                = batch_process_image(
+                    batch_image=batch_dict['input_image'],
+                    batch_size=batch_size,
+                    batch_angle_feats=batch_dict['input_angle_feats']
+                )
             input_image = input_image.to(device_id, dtype=cast_dtype, non_blocking=True)
             input_angle_feats = input_angle_feats.to(device_id, dtype=cast_dtype, non_blocking=True)
 
-            input_ids, attention_mask, labels, image_mask = \
+            input_ids, attention_mask, labels, image_mask, candidates = \
                 batch_process_text(
                     batch_dict=batch_dict,
                     tokenizer=tokenizer,
                     max_length=args.max_length,
                     args=args,
                     image_mask=image_mask,
+                    extract_candidates=True,
                 )
             image_mask = image_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
             input_ids = input_ids.to(device_id, dtype=cast_dtype, non_blocking=True)
             attention_mask = attention_mask.to(device_id, dtype=cast_dtype, non_blocking=True)
             labels = labels.to(device_id, dtype=cast_dtype, non_blocking=True)
+            candidates = candidates.to(device_id, dtype=cast_dtype, non_blocking=True)
 
             with autocast():
                 # TODO candidate action set
                 # TODO EQA: ban action
                 # TODO cand_action = r2r_dataset.get_valid_action()
                 outputs, model_kwargs = model.greedy_inference(
-                    vision_x=(input_image,image_mask,input_angle_feats),
+                    vision_x=(input_image, image_mask, input_angle_feats),
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     model_kwargs=model_kwargs,
+                    max_length=1,
+                    candidates=candidates,
                 )
             action = tokenizer.decode(outputs[0, -1].item())
             batch_dict = r2r_dataset.make_equiv_action(scan, vp, action)
-            import pdb;pdb.set_trace()
-            if action=='<stop>':
+
+            # update all_text, pred_paths
+            all_input_text += batch_dict['input_text'][0]
+            if batch_dict['vp'][0] is not None:
+                traj_infos['pred_paths'].append(batch_dict['vp'][0])
+
+            ended[:] = np.logical_or(ended, (batch_dict['action'] is None)) # [False]
+
+            # Early exit if all ended
+            if ended.all():
                 break
-        import pdb;pdb.set_trace()
 
+        # metrics
+        goal = traj_infos['gt_paths'][-1]
+        pred_path = traj_infos['pred_paths']
+        assert traj_infos['gt_paths'][0] == pred_path[0]
+        final_position = pred_path[-1]
+        nearest_position = r2r_dataset.get_nearest(traj_infos['scan'], goal, pred_path)
+        traj_infos['nav_errors'].append(
+            r2r_dataset.get_distance(traj_infos['scan'], final_position, goal=goal)
+        )
+        traj_infos['oracle_errors'].append(
+            r2r_dataset.get_distance(traj_infos['scan'], nearest_position, goal=goal)
+        )
+        traj_infos['trajectory_steps'].append(len(pred_path)-1) # remove start location
+        distance = 0  # length of the path in meters
+        prev = pred_path[0]
+        for curr in pred_path[1:]:
+            distance += r2r_dataset.get_distance(traj_infos['scan'], prev, curr)
+            prev = curr
+        traj_infos['trajectory_lengths'].append(distance)
+        traj_infos['shortest_lengths'].append(
+            r2r_dataset.get_distance(traj_infos['scan'], traj_infos['gt_paths'][0], goal)
+        )
+        traj_infos['success'] = int(traj_infos['nav_errors'][0] < error_margin)
+        traj_infos['oracle_success'] = int(traj_infos['oracle_errors'][0] < error_margin)
+        traj_infos['spl'] = float(traj_infos['nav_errors'][0] < error_margin) \
+                            * traj_infos['trajectory_lengths'][0] / max(
+            traj_infos['trajectory_lengths'][0], traj_infos['shortest_lengths'][0], 0.01)
 
-###########################################################################################
-    #     # [1] reset env
-    #     obs = reset_env(batch_dict)
-    #
-    #     # [2] Initialization the tracking state
-    #     batch_size = len(obs)
-    #     ended = np.array([False] * batch_size)
-    #     policy_log_probs = []
-    #     traj = [{
-    #         'instr_id': ob['instr_id'],
-    #         'pred_path': [ob['viewpoint']], # start location
-    #     } for ob in obs]
-    #
-    #     ########## Navigation Process ##########
-    #     traj_loss = 0.
-    #     avg_step_loss = Metrics()
-    #     for t in range(agent_config.max_action_len):
-    #         input_imgs = process_image(
-    #             [ob['panoramic_img'] for ob in obs],
-    #             device_id=device_id,
-    #             cast_dtype=cast_dtype,
-    #             training=r2r_dataset.training,
-    #             image_preprocess=r2r_dataset.image_preprocess
-    #         )
-    #
-    #         # label: next action/viewpoint
-    #         answers = compute_label(obs,ended)
-    #
-    #         # input text:
-    #         input_ids, attention_mask, answer_labels, answer_locs = \
-    #             process_text(
-    #                 obs, answers, tokenizer, t,
-    #                 agent_config, args, device_id, cast_dtype
-    #             )
-    #
-    #         with autocast():
-    #             outputs = model(
-    #                 vision_x=input_imgs,
-    #                 lang_x=input_ids,
-    #                 attention_mask=attention_mask,
-    #                 labels=answer_labels,
-    #                 history_vis=t,
-    #             )
-    #             loss = outputs[0]
-    #             logits = outputs[1]
-    #         traj_loss += loss
-    #         if not args.single_step_loss:
-    #             ######### Loss #########
-    #             loss.backward()
-    #             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    #             optimizer.step()
-    #             lr_scheduler.step()
-    #             optimizer.zero_grad()
-    #         avg_step_loss.accumulate(loss.data.item())
-    #
-    #         ######### Make Action #########
-    #         actions = parse_predictions_to_actions(
-    #             batch_size, ended, logits, answer_locs, answers,
-    #             tokenizer, policy_log_probs,
-    #             obs, agent_config, t
-    #         )
-    #
-    #         make_equiv_action(
-    #             actions=actions,
-    #             obs=obs,
-    #             traj=traj,
-    #             batch_env=batch_dict['env'],
-    #         )
-    #
-    #         obs = get_new_obs(batch_dict)
-    #
-    #         ended[:] = np.logical_or(ended, np.array([x is None for x in actions]))
-    #
-    #         # Early exit if all ended
-    #         if ended.all():
-    #             break
-    #
-    #     if args.single_step_loss:
-    #         ######### Loss #########
-    #         traj_loss.backward()
-    #         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    #         optimizer.step()
-    #         lr_scheduler.step()
-    #         optimizer.zero_grad()
-    #         loss_metric.accumulate(traj_loss.data.item())
-    #     else:
-    #         loss_metric.accumulate(traj_loss.data.item())
-    #
-    #     if tb_log is not None and args.rank == 0:
-    #         try:
-    #             cur_lr = float(optimizer.lr)
-    #         except:
-    #             cur_lr = optimizer.param_groups[0]['lr']
-    #
-    #         tb_log.add_scalar('meta_data/learning_rate', cur_lr, global_step)
-    #         tb_log.add_scalar('train/traj_loss', traj_loss.data.item(), global_step)
-    #         tb_log.add_scalar('train/avg_step_loss', avg_step_loss.average, global_step)
-    #
-    #         pbar.update()
-    #         pbar.set_postfix(dict(
-    #             traj_loss=traj_loss.data.item(),
-    #             avg_step_loss=avg_step_loss.average,
-    #             step=global_step,
-    #             lr=cur_lr,
-    #         ))
-    #
-    #     # Log loss to console
-    #     if ((num_steps + 1) % args.logging_steps == 0) and args.rank == 0:
-    #         logger.info(
-    #             f"\nStep {num_steps+1}/{num_batches_per_epoch} of epoch {epoch+1}/{args.num_epochs} complete. "
-    #             f"\nAverage Loss: {loss_metric.average:.3f}"
-    #         )
-    #
-    # return global_step
+        all_traj_infos.append(traj_infos)
+
+    batch_traj_infos = all_gather(all_traj_infos)
+    if args.rank == 0:
+        for value in batch_traj_infos:
+            result_infos += value
+
+    for item in result_infos:
+        results[item['data_type']] += item['success']
+        results['{}_sum'.format(item['data_type'])] += 1
+    for k, v in results.items():
+        if 'sum' in k:
+            continue
+        if k == 'true' or k == 'all':
+            continue
+        logger.info(" - [{}] dataset, success rate: Pred/All = ({})/({}) = {:.2f}%".format(
+            k, results[k], results['{}_sum'.format(k)], (100 * results[k] / (results['{}_sum'.format(k)] + 1))
+        ))
+    results = {
+        'r2r': 0, 'r2r_sum': 0,
+        'cvdn': 0, 'cvdn_sum': 0,
+        'soon': 0, 'soon_sum': 0,
+        'reverie': 0, 'reverie_sum': 0,
+        'eqa': 0, 'eqa_sum': 0,
+        'true': 0, 'all': 0,
+    }
+    for item in result_infos:
+        results[item['data_type']] += item['oracle_success']
+        results['{}_sum'.format(item['data_type'])] += 1
+    for k, v in results.items():
+        if 'sum' in k:
+            continue
+        if k == 'true' or k == 'all':
+            continue
+        logger.info(" - [{}] dataset, oracle success rate: Pred/All = ({})/({}) = {:.2f}%".format(
+            k, results[k], results['{}_sum'.format(k)], (100 * results[k] / (results['{}_sum'.format(k)] + 1))
+        ))
+

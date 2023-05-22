@@ -17,7 +17,7 @@ def llama_model_in_debug_model(lang_encoder_path):
     with open(lang_encoder_path, "rb") as f:
         config = pickle.load(f)
         config.intermediate_size = 512
-        config.num_hidden_layers = 1
+        config.num_hidden_layers = 2
     model_args = ()
     model_kwargs = {}
     with ContextManagers(init_contexts):
