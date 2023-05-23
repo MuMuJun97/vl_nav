@@ -625,14 +625,23 @@ class R2RDataset(torch_data.Dataset):
             std=None
         )
 
-        if args.shuffle:
-            random.seed(self.seed)
-            random.shuffle(self.alldata) if self.training else None
+        # if args.shuffle:
+        #     random.seed(self.seed)
+        #     random.shuffle(self.alldata) if self.training else None
 
         self.tokenizer = tokenizer
         self.image_processor = image_processor
 
+        self.init_dataset(test=test)
+
+        if logger is not None:
+            logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
+                self.__class__.__name__, len(self.alldata), self.split))
+            logger.info(msg)
+
+    def init_dataset(self, test=False):
         self.input_text = []
+        self.gt_text = []
         self.vis_infos = []
         self.last_vp = []
         for index in range(len(self.alldata)):
@@ -641,13 +650,9 @@ class R2RDataset(torch_data.Dataset):
             else:
                 input_text, vis_infos, last_vp = self.pre_process(index)
             self.input_text.append(input_text)
+            self.gt_text.append(input_text)
             self.vis_infos.append(vis_infos)
             self.last_vp.append(last_vp)
-
-        if logger is not None:
-            logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
-                self.__class__.__name__, len(self.alldata), self.split))
-            logger.info(msg)
 
     def get_navigable_Locations(self):
         """
@@ -891,12 +896,12 @@ class R2RDataset(torch_data.Dataset):
             return 'Find the described target, you can ask for help. Target: ' \
                 + item['instruction']
 
-    def get_gt_action(self, scan, loc_a, loc_b):
-        #TODO
-        if loc_a == loc_b:
-            return None
-        path = self.shortest_paths[item['scan']][loc_a][loc_b]
-        import pdb;pdb.set_trace()
+    def get_gt_action(self, scan, vp, target_vp):
+        if vp == target_vp:
+            return '<stop>'
+        path = self.shortest_paths[scan][vp][target_vp]
+        action_id = self.navigable_loc[scan][vp][path[1]]['pointId']
+        return '<walkto{}>'.format(action_id)
 
     def pre_process_test(self, index):
         item = self.alldata[index]
@@ -935,18 +940,23 @@ class R2RDataset(torch_data.Dataset):
         return input_text, vis_infos, paths[-1]      
 
     def get_valid_action(self, scan, vp, heading):
+        assert False
         valid_view = self.compute_angle_features(
             candidates=self.navigable_loc[scan][vp],
             heading=heading,
         )
 
-    def make_equiv_action(self, scan, vp, action):
+    def make_equiv_action(self, scan, vp, action, target_vp, p=0.0):
+        gt_action = self.get_gt_action(scan, vp, target_vp)
+        if np.random.rand() < p:
+            action = gt_action
         if action == '<stop>':
             return {
                 'batch_size': 1,
                 'scan': [None],
                 'vp': [None],
                 'input_text': [action + '</s>'],
+                'gt_text': [gt_action + '</s>'],
                 'vis_infos': [None],
                 'input_image': [None],
                 'input_angle_feats': [None],
@@ -968,11 +978,13 @@ class R2RDataset(torch_data.Dataset):
             heading = next_scan['heading']
             valid_view = self.compute_angle_features(candidates=self.navigable_loc[scan][vp],heading=heading,)
             text = action + '</s>'
-            text += "\nEnvironment: " + "".join([
+            gt_text = gt_action + '</s>'
+            next_env = "\nEnvironment: " + "".join([
                 '<image{}>'.format(x, x) if x in valid_view.keys() else ''
                 for x in range(12)
             ])
-            text += "\nAgent: <s>"
+            text += next_env + "\nAgent: <s>"
+            gt_text += next_env + "\nAgent: <s>"
             vis_infos=[(scan, vp, valid_view)]
             input_image, input_angle_feats = self.get_vis(vis_infos)
 
@@ -981,6 +993,7 @@ class R2RDataset(torch_data.Dataset):
                 'scan': [scan],
                 'vp': [vp],
                 'input_text': [text],
+                'gt_text': [gt_text],
                 'vis_infos': [vis_infos],
                 'input_image': [input_image],
                 'input_angle_feats': [input_angle_feats],
@@ -1027,8 +1040,10 @@ class R2RDataset(torch_data.Dataset):
             )
         return input_text, vis_infos, paths[-1]
 
-    def update_data(self, index, input_text, vis_infos):
-        pass
+    def update_data(self, index, input_text, gt_text, vis_infos):
+        self.input_text[index] = input_text
+        self.gt_text[index] = gt_text
+        self.vis_infos[index] = vis_infos
 
     def __getitem__(self, index):
         item = self.alldata[index]
@@ -1038,7 +1053,10 @@ class R2RDataset(torch_data.Dataset):
         instruction = self.get_instruction(item)
         gt_paths = item['path']
 
-        input_text, vis_infos, last_vp = self.input_text[index], self.vis_infos[index], self.last_vp[index]
+        input_text = self.input_text[index]
+        gt_text = self.gt_text[index]
+        vis_infos = self.vis_infos[index]
+        last_vp = self.last_vp[index]
 
         input_image, input_angle_feats = self.get_vis(vis_infos)
 
@@ -1051,6 +1069,7 @@ class R2RDataset(torch_data.Dataset):
             'gt_paths': gt_paths,
             'instruction': instruction,
             'input_text': input_text,
+            'gt_text': gt_text,
             'vis_infos': vis_infos,
             'input_image': input_image,
             'input_angle_feats': input_angle_feats,
@@ -1105,12 +1124,8 @@ class DistributedSampler(_DistributedSampler):
         return iter(indices)
 
 
-def build_dataloader(args, dataset, seed=None):
-    batch_size = args.batch_size
-    dist = args.distributed
-    workers = args.workers
-    training = False if args.split != 'train' else True
-    if dist:
+def build_dataloader(dataset, batch_size, distributed, workers, training, seed=None):
+    if distributed:
         if training:
             sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         else:
@@ -1119,10 +1134,7 @@ def build_dataloader(args, dataset, seed=None):
     else:
         sampler = None
 
-    if args.shuffle:
-        shuffle = (sampler is None) and training
-    else:
-        shuffle = False
+    shuffle = (sampler is None) and training
 
     dataloader = DataLoader(
         dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,

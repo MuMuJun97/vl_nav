@@ -525,23 +525,36 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         add_special_tokens=False
     )
 
+    batch_gt_text = tokenizer(
+        batch_dict['gt_text'],
+        max_length=max_length,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+        add_special_tokens=False
+    )
+
     input_ids = batch_text['input_ids']
+    gt_ids = batch_gt_text['input_ids']
     media_locations = (input_ids >= args.image_token_ids[0]) & (input_ids <= args.image_token_ids[-1])
     media_nums = media_locations.sum(dim=-1) # B
 
     for bs in range(batch_size):
-        sample_text = tokenizer(
-            batch_dict['input_text'][bs],
-            return_tensors="pt",
-            add_special_tokens=False
-        )
-        sample_text_length = sample_text['input_ids'].shape[-1]
-        # assert sample_text_length < max_length
-        if sample_text_length >= max_length:
-            media_locations = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
-                              (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
-            media_nums = media_locations.sum()
-            image_mask[bs, media_nums:] = False
+        media_nums = media_nums[bs].sum()
+        image_mask[bs, media_nums:] = False
+
+        # sample_text = tokenizer(
+        #     batch_dict['input_text'][bs],
+        #     return_tensors="pt",
+        #     add_special_tokens=False
+        # )
+        # sample_text_length = sample_text['input_ids'].shape[-1]
+        # # assert sample_text_length < max_length
+        # if sample_text_length >= max_length:
+        #     cc = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
+        #                       (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
+        #     media_nums = cc.sum()
+        #     image_mask[bs, media_nums:] = False
 
     action_space_len = len(args.action_token_ids)
 
@@ -556,7 +569,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
             end_locs.append(len(sample_text) - 1)
         assert len(start_locs) == len(end_locs)
         for loc_a, loc_b in zip(start_locs, end_locs):
-            labels[bs, loc_a+1: loc_b+1] = input_ids[bs, loc_a+1: loc_b+1]
+            labels[bs, loc_a+1: loc_b+1] = gt_ids[bs, loc_a+1: loc_b+1]
         # only compute loss on: #Answer:<walkto{view_id}>
         # labels[bs,answer_locs] = input_ids[bs,answer_locs]
 
