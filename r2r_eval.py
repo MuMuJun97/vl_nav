@@ -22,21 +22,9 @@ from tools.train.train_utils import (
     get_checkpoint, save_checkpoint,
 )
 from tools.finetune_utils import (
-    evaluate
+    evaluate, get_tokenizer_token_ids
 )
 import datetime
-
-
-def get_tokenizer_token_ids(tokenizer):
-    image_tokens = ['<image{}>'.format(x) for x in range(12)]
-    action_tokens = ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
-    image_token_ids = tokenizer.encode(
-        "".join(image_tokens),add_special_tokens=False
-    )
-    action_token_ids = tokenizer.encode(
-        "".join(action_tokens),add_special_tokens=False
-    )
-    return image_token_ids, action_token_ids
 
 
 def main():
@@ -113,10 +101,8 @@ def main():
     total_gpus = torch.cuda.device_count()
     device_id = args.rank % total_gpus
     model = model.to(device_id)
-    optimizer = torch.optim.AdamW(get_grouped_params(model, args), lr=args.learning_rate)
-    lr_scheduler = get_constant_schedule_with_warmup(
-        optimizer, num_warmup_steps=args.warmup_steps
-    )
+    optimizer = None
+    lr_scheduler = None
 
     resume_from_epoch = 0
     # TODO : check if a checkpoint exists for this run

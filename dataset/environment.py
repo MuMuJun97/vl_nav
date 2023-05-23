@@ -685,12 +685,25 @@ class R2RDataset(torch_data.Dataset):
         return len(self.alldata)
 
     def load_images(self, scan, vp, valid_ids=None):
+        """
+        Args:
+            scan:
+            vp:
+            valid_ids: valid_view: key is `{index}_{view_id}`
+
+        Returns:
+
+        """
         img_file = self.img_dir / scan / '{}_{}.png'.format(scan, vp)
         assert img_file.exists()
         panoramic_img = cv2.imread(str(img_file))  # BRG
         img_12 = np.hsplit(panoramic_img, 12)
         if valid_ids is not None:
-            img_12 = [img_12[i] for i in valid_ids]
+            if '_' in valid_ids[0]:
+                valid_ids = [eval(vi.split('_')[-1]) for vi in valid_ids]
+                img_12 = [img_12[i] for i in valid_ids]
+            else:
+                img_12 = [img_12[i] for i in valid_ids]
         images = [
             self.image_processor(
                 Image.fromarray(
@@ -738,18 +751,20 @@ class R2RDataset(torch_data.Dataset):
             heading: float, current viewpoint->heading
 
         Returns:
-
+            valid_view: key is `{index}_{view_id}`
         """
         valid_view = dict()
         view_index, state_heading, _ = self.setHeading(heading)
         base_heading = state_heading
         cur_vp = candidates[list(candidates.keys())[0]]
 
+        key_id = 0
         for vp, candidate in candidates.items():
             if vp == cur_vp['viewpointId']:
                 continue
-            if valid_view.get(candidate['pointId'], None) is None:
-                valid_view[candidate['pointId']] = dict()
+            key = '{index}_{view_id}'.format(index=key_id, view_id=candidate['pointId'])
+            if valid_view.get(key, None) is None:
+                valid_view[key] = dict()
 
             # "normalized_heading": state.heading + loc.rel_heading
             normalized_heading = candidate['normalized_heading']
@@ -760,10 +775,11 @@ class R2RDataset(torch_data.Dataset):
                 [math.sin(adj_heading), math.cos(adj_heading)],
                 dtype=np.float32
             )
-            valid_view[candidate['pointId']].update({
+            valid_view[key].update({
                 'angle_feats': adj_angle_feature,
                 'viewpointId': candidate['viewpointId'],
             })
+            key_id += 1
         return valid_view
 
     def get_vis(self, vis_infos):
@@ -782,6 +798,40 @@ class R2RDataset(torch_data.Dataset):
         input_image = torch.cat(input_image, dim=0)
         input_angle_feats = torch.cat(input_angle_feats, dim=0)
         return input_image, input_angle_feats
+
+    def filter_candidate_views(self, valid_view, t=None, trajs=None):
+        # too much candidate vp with the same view_id
+        # if len(valid_view) > 12:
+        #     if t < len(trajs) - 2:
+        #         # next action is <walkto{view_id}>
+        #         valid_vps = [vs['viewpointId'] for vs in list(valid_view.values())]
+        #         gt_index = valid_vps.index(trajs[t + 1])  # next viewpoint
+        #         if gt_index < 12:
+        #             valid_view = dict(list(valid_view.items())[:12])
+        #         else:
+        #             new_valid_view = dict(list(valid_view.items())[:12])
+        #             new_valid_view[list(valid_view.keys())[0]] = valid_view[list(valid_view.keys())[gt_index]]
+        #             valid_view = new_valid_view
+        #     else:
+        #         # next action is <stop>
+        #         valid_view = dict(list(valid_view.items())[:12])
+        #     # valid_view = dict(list(valid_view.items())[:12])
+
+        assert len(valid_view) <= 16
+        # ['<image1>', '<image4>', '<image4>', '<image5>', '<image8>', '<image9>']
+        # valid_view_ids={1, 4, 5, 8, 9}
+        valid_view_ids = set([eval(vi.split('_')[-1]) for vi in list(valid_view.keys())])
+        valid_vps = [vs['viewpointId'] for vs in list(valid_view.values())]
+
+        # TODO raw_id_order = True: keep raw view id, next_view_id is next_vp[`pointId`]
+        if len(valid_view_ids) == len(valid_vps):
+            # img_tokens=['<image1>', '<image4>', '<image4>', '<image5>', '<image8>', '<image9>']
+            raw_id_order = True
+        else:
+            # img_tokens=['<image0>', '<image1>', '<image2>', '<image3>', '<image4>', '<image5>']
+            raw_id_order = False
+
+        return valid_view, valid_view_ids, valid_vps
 
     def load_multi_step_data(self, paths, texts, instruction, navigable_dict, scan,
                              tokenizer=None, item=None):
@@ -839,11 +889,20 @@ class R2RDataset(torch_data.Dataset):
                 heading=heading,
             )
 
-            history_text += "\nEnvironment: " + "".join([
-                '<image{}>'.format(x, x) if x in valid_view.keys() else ''
-                for x in range(12)
-            ])
+            valid_view, valid_view_ids, valid_vps = self.filter_candidate_views(valid_view)
 
+            history_text += "\nEnvironment: "
+            img_tokens = []
+            raw_id_order = False # align with Recurrent VLN-BERT.
+            for key, value in valid_view.items():
+                index, view_id = key.split('_')
+                index, view_id = eval(index), eval(view_id)
+                img_tokens.append(
+                    '<image{view_id}>'.format(
+                        view_id=view_id if raw_id_order else index
+                    )
+                )
+            history_text += "".join(img_tokens)
             vis_infos.append((scan, vp, valid_view))
 
             # Text:
@@ -860,10 +919,15 @@ class R2RDataset(torch_data.Dataset):
                 if next_vp is None:
                     history_text += "\nAgent: <s><stop></s>"
                 else:
-                    next_view_id = navigable_dict[vp][next_vp]['pointId']
-                    assert next_view_id in list(valid_view.keys())
-                    history_text += "\nAgent: <s><walkto{}></s>".format(next_view_id)
-                    heading = (next_view_id % 12) * math.radians(30)
+
+                    if not raw_id_order:
+                        next_view_id = valid_vps.index(next_vp)
+
+                        # this->heading is the base heading of next_viewpoint/location
+                        heading = (navigable_dict[vp][next_vp]['pointId'] % 12) * math.radians(30)
+                        history_text += "\nAgent: <s><walkto{}></s>".format(next_view_id)
+                    else:
+                        raise NotImplementedError
 
         input_text = prompt.format(
             task_description=task_description,
@@ -957,6 +1021,7 @@ class R2RDataset(torch_data.Dataset):
 
         gt_path = batch_dict['gt_paths'][0]
         goal = gt_path[-1]
+
         same_id_count = 0
         if vp in gt_path:
             label = None if vp == gt_path[-1] else gt_path[gt_path.index(vp)+1]
@@ -987,54 +1052,39 @@ class R2RDataset(torch_data.Dataset):
             action_id = eval(action[7:-1]) # <walkto12>
             all_adj = self.navigable_loc[scan][vp]
 
-            pred_next_vps = []
-            for k in all_adj:
-                if k == vp:
-                    continue
-                if all_adj[k]['pointId'] == action_id:
-                    pred_next_vps.append(k)
+            next_scan = list(all_adj.items())[1:][action_id][-1]
 
-            if len(pred_next_vps) == 1:
-                next_scan = all_adj[pred_next_vps[0]]
-            else:
-                same_id_count += 1
-
-                min_distance = 1e+5
-                next_vp_exp = None
-                for p in pred_next_vps:
-                    if self.shortest_distances[scan][p][goal] < min_distance:
-                        min_distance = self.shortest_distances[scan][p][goal]
-                        next_vp_exp = p
-                assert next_vp_exp is not None
-
-                # k == gt_next_vp: ignore vps with the same walkto_id
-                # TODO: fix bugs of vps with the same walkto_id
-
-                if vp == goal:
-                    # current location is goal, but pred is not <stop>
-                    next_scan = all_adj[next_vp_exp]
-                else:
-                    # current location is not goal,
-                    shortest_path = self.shortest_paths[scan][vp][goal]
-                    gt_next_vp = shortest_path[shortest_path.index(vp) + 1]
-                    if gt_next_vp in pred_next_vps:
-                        next_scan = all_adj[gt_next_vp]
-                    else:
-                        # pred next vp is not shortest_path, select min distance.
-                        next_scan = all_adj[next_vp_exp]
-
-            assert next_scan is not None
             next_vp = next_scan['viewpointId']
             next_vp_heading = next_scan['heading']
             next_valid_view = self.compute_angle_features(
                 candidates=self.navigable_loc[scan][next_vp],
                 heading=next_vp_heading,
             )
+
+            next_valid_view, _, _ = self.filter_candidate_views(next_valid_view)
+
             text = action + '</s>'
-            text += "\nEnvironment: " + "".join([
-                '<image{}>'.format(x, x) if x in next_valid_view.keys() else ''
-                for x in range(12)
-            ])
+
+            #######################
+            history_text = "\nEnvironment: "
+            img_tokens = []
+            raw_id_order = False  # align with Recurrent VLN-BERT.
+            for key, value in next_valid_view.items():
+                index, view_id = key.split('_')
+                index, view_id = eval(index), eval(view_id)
+                img_tokens.append(
+                    '<image{view_id}>'.format(
+                        view_id=view_id if raw_id_order else index
+                    )
+                )
+            history_text += "".join(img_tokens)
+            text += history_text
+            #######################
+
+            # text += "\nEnvironment: " + "".join([
+            #     '<image{}>'.format(x, x) if x in next_valid_view.keys() else ''
+            #     for x in range(12)
+            # ])
             text += "\nAgent: <s>"
             vis_infos = [(scan, next_vp, next_valid_view)]
             input_image, input_angle_feats = self.get_vis(vis_infos)

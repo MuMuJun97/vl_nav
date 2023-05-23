@@ -538,9 +538,9 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         sample_text_length = sample_text['input_ids'].shape[-1]
         # assert sample_text_length < max_length
         if sample_text_length >= max_length:
-            media_tmp = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
+            media_locations = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
                               (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
-            media_nums = media_tmp.sum()
+            media_nums = media_locations.sum()
             image_mask[bs, media_nums:] = False
 
     action_space_len = len(args.action_token_ids)
@@ -548,7 +548,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
     input_ids = batch_text['input_ids']
     labels = torch.zeros_like(input_ids) - 100
     if extract_candidates is None:
-        # test: not compute labels
+        # test: not compute labels, train/val: compute labels
         for bs in range(batch_size):
             sample_text = input_ids[bs]
             # Task-description contains <walkto0>...<walkto11><stop>, remove!
@@ -580,7 +580,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
             st_loc = media_locs[st_loc]
         end_loc = media_locs[-1]
         # <image0> + 12 --> <walkto0>
-        candidates = input_ids[0, st_loc:end_loc+1] + 12
+        candidates = input_ids[0, st_loc:end_loc+1] + len(args.image_token_ids)
 
         # add <stop>
         stop_token_id = tokenizer("<stop>",add_special_tokens=False)['input_ids'][-1]

@@ -22,21 +22,9 @@ from tools.train.train_utils import (
     get_checkpoint, save_checkpoint,
 )
 from tools.finetune_utils import (
-    train_one_epoch
+    train_one_epoch, get_tokenizer_token_ids
 )
 import datetime
-
-
-def get_tokenizer_token_ids(tokenizer):
-    image_tokens = ['<image{}>'.format(x) for x in range(12)]
-    action_tokens = ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
-    image_token_ids = tokenizer.encode(
-        "".join(image_tokens),add_special_tokens=False
-    )
-    action_token_ids = tokenizer.encode(
-        "".join(action_tokens),add_special_tokens=False
-    )
-    return image_token_ids, action_token_ids
 
 
 def main():
@@ -98,7 +86,7 @@ def main():
         image_processor=image_processor,
         tokenizer=tokenizer,
     )
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
         args=args,

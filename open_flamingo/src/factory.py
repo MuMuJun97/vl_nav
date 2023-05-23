@@ -82,6 +82,7 @@ def create_model_and_transforms(
         Image processor: Pipeline to preprocess input images
         Tokenizer: A tokenizer for the language model
     """
+    nums = 16
     r2r_tok = args.r2r_tok # (bool, optional): 是否添加新的tokens.
     if 'model_config.pkl' in tokenizer_path:
         from pathlib import Path
@@ -102,9 +103,9 @@ def create_model_and_transforms(
     # add Flamingo special tokens to the tokenizer
 
     if r2r_tok:
-        # add <walkto0-11>
-        action_tokens = ['<image{}>'.format(x) for x in range(12)] \
-                        + ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
+        # add <walkto0-15>
+        action_tokens = ['<image{}>'.format(x) for x in range(nums)] \
+                        + ['<walkto{}>'.format(_) for _ in range(nums)] + ['<stop>']
         media_token_id = None
     else:
         action_tokens = ["<|endofchunk|>", "<image>", "<state>"]
@@ -144,7 +145,7 @@ def create_model_and_transforms(
     # cross_attn_every_n_layers: multi-modal cross fusion layer.
 
     if r2r_tok:
-        image_tokens = ['<image{}>'.format(x) for x in range(12)]
+        image_tokens = ['<image{}>'.format(x) for x in range(nums)]
         media_token_id = text_tokenizer.encode(
             "".join(image_tokens), add_special_tokens=False
         )

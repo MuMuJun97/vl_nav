@@ -22,21 +22,9 @@ from tools.train.train_utils import (
     get_checkpoint, save_checkpoint,
 )
 from tools.finetune_utils import (
-    inference
+    inference, get_tokenizer_token_ids
 )
 import datetime
-
-
-def get_tokenizer_token_ids(tokenizer):
-    image_tokens = ['<image{}>'.format(x) for x in range(12)]
-    action_tokens = ['<walkto{}>'.format(_) for _ in range(12)] + ['<stop>']
-    image_token_ids = tokenizer.encode(
-        "".join(image_tokens),add_special_tokens=False
-    )
-    action_token_ids = tokenizer.encode(
-        "".join(action_tokens),add_special_tokens=False
-    )
-    return image_token_ids, action_token_ids
 
 
 def main():

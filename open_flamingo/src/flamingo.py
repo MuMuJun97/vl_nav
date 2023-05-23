@@ -311,7 +311,7 @@ class Flamingo(nn.Module):
 
         pad_token_id = self.lang_encoder.generation_config.pad_token_id
         eos_token_id = self.eoc_token_id # STOP Token
-        eos_token_id = [eos_token_id[0]] + eos_token_id[-13:] # </s> + <walkto0>...<walkto11><stop>
+        # eos_token_id = [eos_token_id[0]] + eos_token_id[-13:] # </s> + <walkto0>...<walkto11><stop>
         if isinstance(eos_token_id, int):
             eos_token_id = [eos_token_id]
         new_input_ids = input_ids
