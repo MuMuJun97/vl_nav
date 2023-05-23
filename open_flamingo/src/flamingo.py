@@ -323,7 +323,13 @@ class Flamingo(nn.Module):
             else:
                 model_kwargs['attention_mask'] = torch.cat([model_kwargs['attention_mask'], attention_mask],dim=1)
 
-            model_inputs = self.prepare_inputs_for_generation(new_input_ids, **model_kwargs)
+            # model_inputs = self.prepare_inputs_for_generation(new_input_ids, **model_kwargs)
+            model_inputs = {
+                "input_ids": input_ids,
+                "attention_mask": model_kwargs.get('attention_mask', None),
+                "past_key_values": model_kwargs.get('past_key_values', None),
+                "use_cache": model_kwargs.get("use_cache"),
+            }
             # forward pass to get next token
             outputs = self.lang_encoder(
                 **model_inputs,
@@ -347,9 +353,10 @@ class Flamingo(nn.Module):
             new_input_ids = next_tokens[:, None]
             attention_mask = attention_mask.new_ones((attention_mask.shape[0], 1))
 
-            model_kwargs = self._update_model_kwargs_for_generation(
-                outputs, model_kwargs, is_encoder_decoder=False
-            )
+            # model_kwargs = self._update_model_kwargs_for_generation(
+            #     outputs, model_kwargs, is_encoder_decoder=False
+            # )
+            model_kwargs["past_key_values"] = outputs.past_key_values
 
             # stop when each sentence is finished, or if we exceed the maximum length
             if next_tokens[0] in eos_token_id or input_ids.shape[-1] >= max_length:

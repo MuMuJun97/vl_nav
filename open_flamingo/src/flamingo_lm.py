@@ -50,20 +50,19 @@ class FlamingoLMMixin(nn.Module):
                 "Flamingo layers are not initialized. Please call `init_flamingo` first."
             )
 
-        if kwargs["past_key_values"] is None:
-            input_ids = kwargs["input_ids"] if "input_ids" in kwargs else input[0]
+        # if kwargs["past_key_values"] is None:
+        input_ids = kwargs["input_ids"] if "input_ids" in kwargs else input[0]
 
-            if isinstance(self.media_token_id, int):
-                media_locations = input_ids == self.media_token_id
-            elif isinstance(self.media_token_id, list):
-                media_locations = (input_ids >= self.media_token_id[0]) & \
-                                  (input_ids <= self.media_token_id[-1])
+        if isinstance(self.media_token_id, int):
+            media_locations = input_ids == self.media_token_id
+        elif isinstance(self.media_token_id, list):
+            media_locations = (input_ids >= self.media_token_id[0]) & \
+                                (input_ids <= self.media_token_id[-1])
 
-            inputs_embeds = self.model.embed_tokens(input_ids)
-            inputs_embeds[media_locations] += self.vis_x
-
-            kwargs["input_ids"] = None
-            kwargs["inputs_embeds"] = inputs_embeds
+        inputs_embeds = self.model.embed_tokens(input_ids)
+        inputs_embeds[media_locations] += self.vis_x
+        kwargs["input_ids"] = None
+        kwargs["inputs_embeds"] = inputs_embeds
 
         return super().forward(
             *input, **kwargs

@@ -959,17 +959,14 @@ class R2RDataset(torch_data.Dataset):
             for k in all_adj:
                 if k == vp:
                     continue
-                next_scan = all_adj[k] # need comment
+                # next_scan = all_adj[k] # need comment
                 if all_adj[k]['pointId'] == action_id and all_adj[k]['distance'] < next_scan_dis:
                     next_scan_dis = all_adj[k]['distance']
                     next_scan = all_adj[k]
             assert next_scan is not None
             vp = next_scan['viewpointId']
             heading = next_scan['heading']
-            valid_view = self.compute_angle_features(
-                candidates=self.navigable_loc[scan][vp],
-                heading=heading,
-            )
+            valid_view = self.compute_angle_features(candidates=self.navigable_loc[scan][vp],heading=heading,)
             text = action + '</s>'
             text += "\nEnvironment: " + "".join([
                 '<image{}>'.format(x, x) if x in valid_view.keys() else ''

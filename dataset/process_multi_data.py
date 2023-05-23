@@ -575,7 +575,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         # <image0> + 12 --> <walkto0>
         candidates = input_ids[0, st_loc:end_loc+1] + 12
         # add <stop>
-        candidates = torch.cat([candidates, torch.tensor([32025])])
+        candidates = torch.cat([candidates, torch.tensor([32024])])
 
         return input_ids, batch_text['attention_mask'], labels, image_mask, candidates
 
