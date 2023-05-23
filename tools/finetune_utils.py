@@ -1,3 +1,5 @@
+import pickle
+
 import torch
 import numpy as np
 import re
@@ -749,7 +751,12 @@ def inference(
             'oracle_errors': [],
             'trajectory_steps': [],
             'trajectory_lengths': [],
-            'shortest_lengths': []
+            'shortest_lengths': [],
+            'pred': {
+                'success': 0,
+                'is_gt_path': 0,
+                'same_id_count': 0,
+            }
         }
         all_input_text += batch_dict['input_text'][0]
 
@@ -794,12 +801,16 @@ def inference(
                     candidates=candidates,
                 )
             action = tokenizer.decode(outputs[0, -1].item())
-            batch_dict = r2r_dataset.make_equiv_action(scan, vp, action)
+            batch_dict = r2r_dataset.make_equiv_action(scan, vp, action, batch_dict=batch_dict)
 
             # update all_text, pred_paths
             all_input_text += batch_dict['input_text'][0]
             if batch_dict['vp'][0] is not None:
                 traj_infos['pred_paths'].append(batch_dict['vp'][0])
+
+            traj_infos['pred']['success'] += batch_dict['pred']['success']
+            traj_infos['pred']['is_gt_path'] += batch_dict['pred']['is_gt_path']
+            traj_infos['pred']['same_id_count'] += batch_dict['pred']['same_id_count']
 
             ended[:] = np.logical_or(ended, (batch_dict['action'] is None)) # [False]
             # Early exit if all ended
@@ -843,6 +854,9 @@ def inference(
     if args.rank == 0:
         for value in batch_traj_infos:
             result_infos += value
+        import pickle
+        with open('{}/pred_{}_results.pkl'.format(args.run_name, args.split), 'wb') as f:
+            pickle.dump(result_infos, f)
 
     for item in result_infos:
         results[item['data_type']] += item['success']

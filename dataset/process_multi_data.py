@@ -538,32 +538,39 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         sample_text_length = sample_text['input_ids'].shape[-1]
         # assert sample_text_length < max_length
         if sample_text_length >= max_length:
-            media_locations = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
+            media_tmp = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
                               (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
-            media_nums = media_locations.sum()
+            media_nums = media_tmp.sum()
             image_mask[bs, media_nums:] = False
 
     action_space_len = len(args.action_token_ids)
 
     input_ids = batch_text['input_ids']
     labels = torch.zeros_like(input_ids) - 100
-    for bs in range(batch_size):
-        sample_text = input_ids[bs]
-        # Task-description contains <walkto0>...<walkto11><stop>, remove!
-        start_locs = torch.nonzero(sample_text == 1,as_tuple=True)[0].tolist()
-        end_locs = torch.nonzero(sample_text == 2,as_tuple=True)[0].tolist()
-        if len(end_locs) < len(start_locs):
-            end_locs.append(len(sample_text) - 1)
-        assert len(start_locs) == len(end_locs)
-        for loc_a, loc_b in zip(start_locs, end_locs):
-            labels[bs, loc_a+1: loc_b+1] = input_ids[bs, loc_a+1: loc_b+1]
-        # only compute loss on: #Answer:<walkto{view_id}>
-        # labels[bs,answer_locs] = input_ids[bs,answer_locs]
+    if extract_candidates is None:
+        # test: not compute labels
+        for bs in range(batch_size):
+            sample_text = input_ids[bs]
+            # Task-description contains <walkto0>...<walkto11><stop>, remove!
+            start_locs = torch.nonzero(sample_text == 1,as_tuple=True)[0].tolist()
+            end_locs = torch.nonzero(sample_text == 2,as_tuple=True)[0].tolist()
+            if len(end_locs) < len(start_locs):
+                end_locs.append(len(sample_text) - 1)
+            assert len(start_locs) == len(end_locs)
+            for loc_a, loc_b in zip(start_locs, end_locs):
+                labels[bs, loc_a+1: loc_b+1] = input_ids[bs, loc_a+1: loc_b+1]
+            # only compute loss on: #Answer:<walkto{view_id}>
+            # labels[bs,answer_locs] = input_ids[bs,answer_locs]
 
-    # generate: find the candidate action set
-    if extract_candidates is not None:
+        return input_ids, batch_text['attention_mask'], labels, image_mask
+    else:
+        # generate: find the candidate action set
         assert batch_size == 1
-        media_locs = torch.where(media_locations == True)[1]
+
+        if len(media_locations.shape) == 1:
+            media_locs = torch.where(media_locations == True)[0]
+        else:
+            media_locs = torch.where(media_locations == True)[1]
         loc_diff = torch.diff(media_locs)
         st_loc = torch.where(loc_diff > 1)[0]
         if len(st_loc) == 0:
@@ -574,12 +581,12 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         end_loc = media_locs[-1]
         # <image0> + 12 --> <walkto0>
         candidates = input_ids[0, st_loc:end_loc+1] + 12
+
         # add <stop>
-        candidates = torch.cat([candidates, torch.tensor([32024])])
+        stop_token_id = tokenizer("<stop>",add_special_tokens=False)['input_ids'][-1]
+        candidates = torch.cat([candidates, torch.tensor([stop_token_id])])
 
         return input_ids, batch_text['attention_mask'], labels, image_mask, candidates
-
-    return input_ids, batch_text['attention_mask'], labels, image_mask
 
 
 def batch_process_image(batch_image, batch_size, batch_angle_feats):

@@ -895,7 +895,7 @@ class R2RDataset(torch_data.Dataset):
         #TODO
         if loc_a == loc_b:
             return None
-        path = self.shortest_paths[item['scan']][loc_a][loc_b]
+        # path = self.shortest_paths[item['scan']][loc_a][loc_b]
         import pdb;pdb.set_trace()
 
     def pre_process_test(self, index):
@@ -940,51 +940,120 @@ class R2RDataset(torch_data.Dataset):
             heading=heading,
         )
 
-    def make_equiv_action(self, scan, vp, action):
+    def make_equiv_action(self, scan, vp, action, batch_dict):
+        """
+        Args:
+            scan:
+            vp:
+            action:
+            batch_dict:
+
+        Note:
+            (1) (cur)vp in gt_path: if action is next_gt_vp: +1 else -1
+            (2) (cur)vp not in gt_path: shortest_path<vp, goal> as pseudo_gt_path,
+        Returns:
+
+        """
+
+        gt_path = batch_dict['gt_paths'][0]
+        goal = gt_path[-1]
+        same_id_count = 0
+        if vp in gt_path:
+            label = None if vp == gt_path[-1] else gt_path[gt_path.index(vp)+1]
+            use_pseudo_label = False
+        else:
+            pseudo_path = self.shortest_paths[scan][vp][goal]
+            label = pseudo_path[1]
+            use_pseudo_label = True
+
         if action == '<stop>':
             return {
                 'batch_size': 1,
-                'scan': [None],
+                'scan': [scan],
                 'vp': [None],
                 'input_text': [action + '</s>'],
                 'vis_infos': [None],
                 'input_image': [None],
                 'input_angle_feats': [None],
                 'action': None,
+                'gt_paths': [gt_path],
+                'pred': {
+                    'success': label is None,
+                    'is_gt_path': not use_pseudo_label,
+                    'same_id_count': same_id_count,
+                }
             }
         else:
             action_id = eval(action[7:-1]) # <walkto12>
             all_adj = self.navigable_loc[scan][vp]
-            next_scan_dis = 1e+5
+
+            pred_next_vps = []
             for k in all_adj:
                 if k == vp:
                     continue
-                # next_scan = all_adj[k] # need comment
-                if all_adj[k]['pointId'] == action_id and all_adj[k]['distance'] < next_scan_dis:
-                    next_scan_dis = all_adj[k]['distance']
-                    next_scan = all_adj[k]
+                if all_adj[k]['pointId'] == action_id:
+                    pred_next_vps.append(k)
+
+            if len(pred_next_vps) == 1:
+                next_scan = all_adj[pred_next_vps[0]]
+            else:
+                same_id_count += 1
+
+                min_distance = 1e+5
+                next_vp_exp = None
+                for p in pred_next_vps:
+                    if self.shortest_distances[scan][p][goal] < min_distance:
+                        min_distance = self.shortest_distances[scan][p][goal]
+                        next_vp_exp = p
+                assert next_vp_exp is not None
+
+                # k == gt_next_vp: ignore vps with the same walkto_id
+                # TODO: fix bugs of vps with the same walkto_id
+
+                if vp == goal:
+                    # current location is goal, but pred is not <stop>
+                    next_scan = all_adj[next_vp_exp]
+                else:
+                    # current location is not goal,
+                    shortest_path = self.shortest_paths[scan][vp][goal]
+                    gt_next_vp = shortest_path[shortest_path.index(vp) + 1]
+                    if gt_next_vp in pred_next_vps:
+                        next_scan = all_adj[gt_next_vp]
+                    else:
+                        # pred next vp is not shortest_path, select min distance.
+                        next_scan = all_adj[next_vp_exp]
+
             assert next_scan is not None
-            vp = next_scan['viewpointId']
-            heading = next_scan['heading']
-            valid_view = self.compute_angle_features(candidates=self.navigable_loc[scan][vp],heading=heading,)
+            next_vp = next_scan['viewpointId']
+            next_vp_heading = next_scan['heading']
+            next_valid_view = self.compute_angle_features(
+                candidates=self.navigable_loc[scan][next_vp],
+                heading=next_vp_heading,
+            )
             text = action + '</s>'
             text += "\nEnvironment: " + "".join([
-                '<image{}>'.format(x, x) if x in valid_view.keys() else ''
+                '<image{}>'.format(x, x) if x in next_valid_view.keys() else ''
                 for x in range(12)
             ])
             text += "\nAgent: <s>"
-            vis_infos=[(scan, vp, valid_view)]
+            vis_infos = [(scan, next_vp, next_valid_view)]
             input_image, input_angle_feats = self.get_vis(vis_infos)
 
             return {
                 'batch_size': 1,
                 'scan': [scan],
-                'vp': [vp],
+                'vp': [next_vp],
                 'input_text': [text],
                 'vis_infos': [vis_infos],
                 'input_image': [input_image],
                 'input_angle_feats': [input_angle_feats],
                 'action': action_id,
+                'gt_paths': [gt_path],
+                'pred': {
+                    'success': next_vp == label,
+                    'is_gt_path': not use_pseudo_label,
+                    'same_id_count': same_id_count,
+                }
             }
 
     def get_nearest(self, scan, goal_id, path):
