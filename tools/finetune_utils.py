@@ -802,7 +802,6 @@ def inference(
                 traj_infos['pred_paths'].append(batch_dict['vp'][0])
 
             ended[:] = np.logical_or(ended, (batch_dict['action'] is None)) # [False]
-
             # Early exit if all ended
             if ended.all():
                 break
@@ -834,7 +833,7 @@ def inference(
         traj_infos['spl'] = float(traj_infos['nav_errors'][0] < error_margin) \
                             * traj_infos['trajectory_lengths'][0] / max(
             traj_infos['trajectory_lengths'][0], traj_infos['shortest_lengths'][0], 0.01)
-
+        # import pdb;pdb.set_trace()
         all_traj_infos.append(traj_infos)
 
         if args.rank == 0:
