@@ -538,9 +538,9 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         sample_text_length = sample_text['input_ids'].shape[-1]
         # assert sample_text_length < max_length
         if sample_text_length >= max_length:
-            media_locations = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
+            cc = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
                               (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
-            media_nums = media_locations.sum()
+            media_nums = cc.sum()
             image_mask[bs, media_nums:] = False
 
     action_space_len = len(args.action_token_ids)
