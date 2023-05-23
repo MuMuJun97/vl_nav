@@ -97,12 +97,11 @@ def main():
         args=args,
         image_processor=image_processor,
         tokenizer=tokenizer,
+        test=False
     )
-    import pdb;pdb.set_trace()
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
-        args=args,
-        dataset=r2r_dataset,
+        dataset=r2r_dataset, batch_size=args.batch_size, distributed=args.distributed, workers=args.workers, training=True
     )
 
     ############# Init #############
@@ -155,6 +154,25 @@ def main():
             tb_log=tb_log,
             logger=logger
         )
+        r2r_dataset.init_dataset(test=True)
+        r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
+            dataset=r2r_dataset, batch_size=1, distributed=args.distributed, workers=args.workers, training=False
+        )
+        inference(
+            args=args,
+            model=model,
+            r2r_dataset=r2r_dataset,
+            r2r_dataloader=r2r_dataloader,
+            tokenizer=tokenizer,
+            device_id=device_id,
+            logger=logger,
+            p=1.0,
+            update_dataset=['r2r','soon','reverie']
+        )
+        r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
+            dataset=r2r_dataset, batch_size=args.batch_size, distributed=args.distributed, workers=args.workers, training=True
+        )
+
 
         if args.rank == 0 and (epoch % args.save_ckpt_step == 0 or epoch == args.num_epochs-1):
             min_val_loss = 0

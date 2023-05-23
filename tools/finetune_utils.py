@@ -702,7 +702,7 @@ def evaluate(
 
 @torch.no_grad()
 def inference(
-    args, model, r2r_dataset, r2r_dataloader, tokenizer, device_id, logger=None
+    args, model, r2r_dataset, r2r_dataloader, tokenizer, device_id, logger=None, p=0.0, update_dataset=[]
 ):
     model.eval()
     loss_metric = Metrics()
@@ -733,7 +733,9 @@ def inference(
     for num_steps, batch_dict in pbar:
         batch_size = batch_dict['batch_size']
         assert batch_size == 1
+        index = batch_dict['sample_idx']
         all_input_text = ""
+        all_gt_text = ""
         all_vis_infos = []
         model_kwargs = {}
 
@@ -752,6 +754,9 @@ def inference(
             'shortest_lengths': []
         }
         all_input_text += batch_dict['input_text'][0]
+        all_gt_text += batch_dict['gt_text'][0]
+        if batch_dict['vis_infos'][0] is not None:
+            all_vis_infos.extend(batch_dict['vis_infos'][0])
 
         for t in range(args.max_action_len):
             scan = batch_dict['scan'][0]
@@ -794,10 +799,14 @@ def inference(
                     candidates=candidates,
                 )
             action = tokenizer.decode(outputs[0, -1].item())
-            batch_dict = r2r_dataset.make_equiv_action(scan, vp, action)
+            batch_dict = r2r_dataset.make_equiv_action(scan, vp, action, traj_infos['gt_paths'][-1], p=p)
 
             # update all_text, pred_paths
             all_input_text += batch_dict['input_text'][0]
+            all_gt_text += batch_dict['gt_text'][0]
+            if batch_dict['vis_infos'][0] is not None:
+                all_vis_infos.extend(batch_dict['vis_infos'][0])
+    
             if batch_dict['vp'][0] is not None:
                 traj_infos['pred_paths'].append(batch_dict['vp'][0])
 
@@ -806,6 +815,9 @@ def inference(
             if ended.all():
                 break
 
+        if traj_infos['data_type'] in update_dataset:
+            r2r_dataset.update_data(index, all_input_text, all_gt_text, all_vis_infos)
+        
         # metrics
         goal = traj_infos['gt_paths'][-1]
         pred_path = traj_infos['pred_paths']
@@ -833,7 +845,6 @@ def inference(
         traj_infos['spl'] = float(traj_infos['nav_errors'][0] < error_margin) \
                             * traj_infos['trajectory_lengths'][0] / max(
             traj_infos['trajectory_lengths'][0], traj_infos['shortest_lengths'][0], 0.01)
-        # import pdb;pdb.set_trace()
         all_traj_infos.append(traj_infos)
 
         if args.rank == 0:

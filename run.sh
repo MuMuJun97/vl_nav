@@ -12,7 +12,7 @@ torchrun --nnodes=1 --nproc_per_node=1 r2r_train.py \
 --logging_steps 200
 
 
-torchrun --nnodes=1 --nproc_per_node=1 r2r_eval.py \
+torchrun --nnodes=1 --nproc_per_node=8 r2r_eval.py \
 --tokenizer_path /mnt/lustre/huangshijia.p/LLAMA_7B \
 --run_name baseline1 \
 --cfg_file tools/cfgs/datasets/s2_r2r_dataset.yaml \
@@ -22,12 +22,12 @@ torchrun --nnodes=1 --nproc_per_node=1 r2r_eval.py \
 --warmup_steps 500 \
 --workers 4 \
 --logging_steps 200 \
---num_epochs 4 \
+--num_epochs 1 \
 --split val_seen \
 --resume_from_checkpoint /mnt/lustre/huangshijia.p/MM/vl_nav_output/baseline1/checkpoint_2.pt
 
 
-torchrun --nnodes=1 --nproc_per_node=1 r2r_test.py \
+torchrun --nnodes=1 --nproc_per_node=8 r2r_test.py \
 --tokenizer_path /mnt/lustre/huangshijia.p/LLAMA_7B \
 --run_name baseline1 \
 --cfg_file tools/cfgs/datasets/s2_r2r_dataset.yaml \
@@ -37,6 +37,6 @@ torchrun --nnodes=1 --nproc_per_node=1 r2r_test.py \
 --warmup_steps 500 \
 --workers 4 \
 --logging_steps 200 \
---num_epochs 4 \
+--num_epochs 1 \
 --split val_seen \
 --resume_from_checkpoint /mnt/lustre/huangshijia.p/MM/vl_nav_output/baseline1/checkpoint_2.pt
