@@ -733,7 +733,11 @@ def inference(
     for num_steps, batch_dict in pbar:
         batch_size = batch_dict['batch_size']
         assert batch_size == 1
-        index = batch_dict['sample_idx']
+        index = batch_dict['sample_idx'][0]
+        if update_dataset != [] and batch_dict['data_type'][0] not in update_dataset:
+            if args.rank == 0:
+                pbar.update()
+            continue
         all_input_text = ""
         all_gt_text = ""
         all_vis_infos = []
@@ -787,9 +791,7 @@ def inference(
             candidates = candidates.to(device_id, dtype=cast_dtype, non_blocking=True)
 
             with autocast():
-                # TODO candidate action set
                 # TODO EQA: ban action
-                # TODO cand_action = r2r_dataset.get_valid_action()
                 outputs, model_kwargs = model.greedy_inference(
                     vision_x=(input_image, image_mask, input_angle_feats),
                     input_ids=input_ids,
@@ -817,7 +819,9 @@ def inference(
 
         if traj_infos['data_type'] in update_dataset:
             r2r_dataset.update_data(index, all_input_text, all_gt_text, all_vis_infos)
-        
+            if args.rank == 0:
+                pbar.update()
+            continue
         # metrics
         goal = traj_infos['gt_paths'][-1]
         pred_path = traj_infos['pred_paths']
@@ -849,6 +853,9 @@ def inference(
 
         if args.rank == 0:
             pbar.update()
+
+    if update_dataset != []:
+        return
 
     batch_traj_infos = all_gather(all_traj_infos)
     if args.rank == 0:

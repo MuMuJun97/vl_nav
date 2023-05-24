@@ -1,14 +1,28 @@
-torchrun --nnodes=1 --nproc_per_node=1 r2r_train.py \
+torchrun --nnodes=1 --nproc_per_node=8 r2r_train.py \
 --tokenizer_path /mnt/lustre/huangshijia.p/LLAMA_7B \
---run_name test1 \
+--run_name baseline2 \
 --cfg_file tools/cfgs/datasets/s2_r2r_dataset.yaml \
---batch_size 2 \
+--batch_size 1 \
 --learning_rate 5e-5 \
 --vision_encoder_path "ViT-B-16" \
 --warmup_steps 500 \
 --workers 4 \
 --num_epochs 4 \
 --save_ckpt_step 1 \
+--logging_steps 200
+
+torchrun --nnodes=1 --nproc_per_node=8 r2r_train.py \
+--tokenizer_path /mnt/lustre/huangshijia.p/LLAMA_7B \
+--run_name samping1 \
+--cfg_file tools/cfgs/datasets/s2_r2r_dataset.yaml \
+--batch_size 1 \
+--sampling_p 0.5 \
+--learning_rate 5e-5 \
+--vision_encoder_path "ViT-B-16" \
+--warmup_steps 500 \
+--workers 4 \
+--num_epochs 10 \
+--save_ckpt_step 2 \
 --logging_steps 200
 
 

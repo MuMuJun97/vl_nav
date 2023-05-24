@@ -27,6 +27,7 @@ from dataset.process_multi_data import (
     generate_graphs,load_nav_graphs,
     load_eqa_data, load_cvdn_data
 )
+from tools.common_utils import all_gather
 
 def new_simulator(connectivity_dir):
     try:
@@ -631,19 +632,12 @@ class R2RDataset(torch_data.Dataset):
 
         self.tokenizer = tokenizer
         self.image_processor = image_processor
-
-        self.init_dataset(test=test)
-
-        if logger is not None:
-            logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
-                self.__class__.__name__, len(self.alldata), self.split))
-            logger.info(msg)
-
-    def init_dataset(self, test=False):
+        
         self.input_text = []
         self.gt_text = []
         self.vis_infos = []
         self.last_vp = []
+        self.flag = []
         for index in range(len(self.alldata)):
             if test:
                 input_text, vis_infos, last_vp = self.pre_process_test(index)
@@ -653,6 +647,42 @@ class R2RDataset(torch_data.Dataset):
             self.gt_text.append(input_text)
             self.vis_infos.append(vis_infos)
             self.last_vp.append(last_vp)
+            self.flag.append(test==False)
+
+        if logger is not None:
+            logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
+                self.__class__.__name__, len(self.alldata), self.split))
+            logger.info(msg)
+
+    def reinit_dataset(self, test=False, filter=[]):
+        for index in range(len(self.alldata)):
+            data_type = self.alldata[index]['data_type']
+            if filter != [] and data_type not in filter:
+                continue
+            if test:
+                input_text, vis_infos, last_vp = self.pre_process_test(index)
+            else:
+                input_text, vis_infos, last_vp = self.pre_process(index)
+            self.input_text[index] = input_text
+            self.gt_text[index] = input_text
+            self.vis_infos[index] = vis_infos
+            self.last_vp[index] = last_vp
+            self.flag[index] = (test == False)
+
+    def sync_data(self):
+        for index in range(len(self.alldata)):
+            datas = all_gather({
+                'input_text': self.input_text[index],
+                'gt_text': self.gt_text[index],
+                'vis_infos': self.vis_infos[index],
+                'flag': self.flag[index]})
+            for data in datas:
+                if data['flag'] == True:
+                    self.input_text[index] = data['input_text']
+                    self.gt_text[index] = data['gt_text']
+                    self.vis_infos[index] = data['vis_infos']
+                    self.flag[index] = data['flag']
+
 
     def get_navigable_Locations(self):
         """
@@ -1044,6 +1074,7 @@ class R2RDataset(torch_data.Dataset):
         self.input_text[index] = input_text
         self.gt_text[index] = gt_text
         self.vis_infos[index] = vis_infos
+        self.flag[index] = True
 
     def __getitem__(self, index):
         item = self.alldata[index]
