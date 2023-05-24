@@ -22,7 +22,7 @@ from tools.train.train_utils import (
     get_checkpoint, save_checkpoint,
 )
 from tools.finetune_utils import (
-    train_one_epoch, get_tokenizer_token_ids
+    train_one_epoch, get_tokenizer_token_ids, inference
 )
 import datetime
 
@@ -37,6 +37,7 @@ def main():
     global_cfg.Dataset.Object_Features_File_Map = global_cfg.Dataset.Object_Features_File_Map[args.obj_feats]
     args.enable_imgdataset = False if global_cfg.Dataset.get('IMG_DIR',None) is None else True
     args.max_length = global_cfg.Dataset.tokenizer.max_length
+    args.max_action_len = global_cfg.Agent.max_action_len
 
     device_id = init_distributed_device(args)  # TODO multi-GPU training.
 
@@ -85,12 +86,11 @@ def main():
         args=args,
         image_processor=image_processor,
         tokenizer=tokenizer,
+        test=False
     )
-    # import pdb;pdb.set_trace()
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
-        args=args,
-        dataset=r2r_dataset,
+        dataset=r2r_dataset, batch_size=args.batch_size, distributed=args.distributed, workers=args.workers, training=True
     )
 
     ############# Init #############
@@ -129,6 +129,30 @@ def main():
     ############# Train #############
 
     for epoch in range(resume_from_epoch, args.num_epochs):
+        
+        # Schedule Sampling
+        cnt_p = args.sampling_p ** epoch
+        if cnt_p < 1.0:
+            r2r_dataset.reinit_dataset(test=True, filter=['r2r', 'soon', 'reverie'])
+            r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
+                dataset=r2r_dataset, batch_size=1, distributed=args.distributed, workers=args.workers, training=False
+            )
+            inference(
+                args=args,
+                model=model,
+                r2r_dataset=r2r_dataset,
+                r2r_dataloader=r2r_dataloader,
+                tokenizer=tokenizer,
+                device_id=device_id,
+                logger=logger,
+                p=cnt_p,
+                update_dataset=['r2r', 'soon', 'reverie']
+            )
+            r2r_dataset.sync_data()
+            r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
+                dataset=r2r_dataset, batch_size=args.batch_size, distributed=args.distributed, workers=args.workers, training=True
+            )
+
         global_step = train_one_epoch(
             args=args,
             agent_config=global_cfg.Agent,

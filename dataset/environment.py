@@ -27,6 +27,7 @@ from dataset.process_multi_data import (
     generate_graphs,load_nav_graphs,
     load_eqa_data, load_cvdn_data
 )
+from tools.common_utils import all_gather
 
 def new_simulator(connectivity_dir):
     try:
@@ -625,29 +626,63 @@ class R2RDataset(torch_data.Dataset):
             std=None
         )
 
-        if args.shuffle:
-            random.seed(self.seed)
-            random.shuffle(self.alldata) if self.training else None
+        # if args.shuffle:
+        #     random.seed(self.seed)
+        #     random.shuffle(self.alldata) if self.training else None
 
         self.tokenizer = tokenizer
         self.image_processor = image_processor
-
+        
         self.input_text = []
+        self.gt_text = []
         self.vis_infos = []
         self.last_vp = []
+        self.flag = []
         for index in range(len(self.alldata)):
             if test:
                 input_text, vis_infos, last_vp = self.pre_process_test(index)
             else:
                 input_text, vis_infos, last_vp = self.pre_process(index)
             self.input_text.append(input_text)
+            self.gt_text.append(input_text)
             self.vis_infos.append(vis_infos)
             self.last_vp.append(last_vp)
+            self.flag.append(test==False)
 
         if logger is not None:
             logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
                 self.__class__.__name__, len(self.alldata), self.split))
             logger.info(msg)
+
+    def reinit_dataset(self, test=False, filter=[]):
+        for index in range(len(self.alldata)):
+            data_type = self.alldata[index]['data_type']
+            if filter != [] and data_type not in filter:
+                continue
+            if test:
+                input_text, vis_infos, last_vp = self.pre_process_test(index)
+            else:
+                input_text, vis_infos, last_vp = self.pre_process(index)
+            self.input_text[index] = input_text
+            self.gt_text[index] = input_text
+            self.vis_infos[index] = vis_infos
+            self.last_vp[index] = last_vp
+            self.flag[index] = (test == False)
+
+    def sync_data(self):
+        for index in range(len(self.alldata)):
+            datas = all_gather({
+                'input_text': self.input_text[index],
+                'gt_text': self.gt_text[index],
+                'vis_infos': self.vis_infos[index],
+                'flag': self.flag[index]})
+            for data in datas:
+                if data['flag'] == True:
+                    self.input_text[index] = data['input_text']
+                    self.gt_text[index] = data['gt_text']
+                    self.vis_infos[index] = data['vis_infos']
+                    self.flag[index] = data['flag']
+
 
     def get_navigable_Locations(self):
         """
@@ -818,6 +853,7 @@ class R2RDataset(torch_data.Dataset):
         #     # valid_view = dict(list(valid_view.items())[:12])
 
         assert len(valid_view) <= 16
+
         # ['<image1>', '<image4>', '<image4>', '<image5>', '<image8>', '<image9>']
         # valid_view_ids={1, 4, 5, 8, 9}
         valid_view_ids = set([eval(vi.split('_')[-1]) for vi in list(valid_view.keys())])
@@ -924,7 +960,8 @@ class R2RDataset(torch_data.Dataset):
                         next_view_id = valid_vps.index(next_vp)
 
                         # this->heading is the base heading of next_viewpoint/location
-                        heading = (navigable_dict[vp][next_vp]['pointId'] % 12) * math.radians(30)
+                        this_heading = navigable_dict[vp][next_vp]['pointId']
+                        heading = (this_heading % 12) * math.radians(30)
                         history_text += "\nAgent: <s><walkto{}></s>".format(next_view_id)
                     else:
                         raise NotImplementedError
@@ -955,12 +992,18 @@ class R2RDataset(torch_data.Dataset):
             return 'Find the described target, you can ask for help. Target: ' \
                 + item['instruction']
 
-    def get_gt_action(self, scan, loc_a, loc_b):
-        #TODO
-        if loc_a == loc_b:
-            return None
-        # path = self.shortest_paths[item['scan']][loc_a][loc_b]
-        import pdb;pdb.set_trace()
+    def get_gt_action(self, scan, vp, target_vp):
+        if vp == target_vp:
+            return '<stop>'
+        path = self.shortest_paths[scan][vp][target_vp]
+
+        candidates = self.navigable_loc[scan][vp]
+        candidate_indexs = list(candidates.keys())[1:]
+
+        # action_id: candidates->index (next viewpoint)
+        action_id = candidate_indexs.index(path[1])
+
+        return '<walkto{}>'.format(action_id)
 
     def pre_process_test(self, index):
         item = self.alldata[index]
@@ -999,18 +1042,21 @@ class R2RDataset(torch_data.Dataset):
         return input_text, vis_infos, paths[-1]      
 
     def get_valid_action(self, scan, vp, heading):
+        assert False
         valid_view = self.compute_angle_features(
             candidates=self.navigable_loc[scan][vp],
             heading=heading,
         )
 
-    def make_equiv_action(self, scan, vp, action, batch_dict):
+    def make_equiv_action(self, scan, vp, action, batch_dict, target_vp, p=0.0):
         """
         Args:
             scan:
             vp:
             action:
             batch_dict:
+            target_vp:
+            p:
 
         Note:
             (1) (cur)vp in gt_path: if action is next_gt_vp: +1 else -1
@@ -1018,6 +1064,11 @@ class R2RDataset(torch_data.Dataset):
         Returns:
 
         """
+
+        # p sampling
+        gt_action = self.get_gt_action(scan, vp, target_vp)
+        if np.random.rand() < p:
+            action = gt_action
 
         gt_path = batch_dict['gt_paths'][0]
         goal = gt_path[-1]
@@ -1037,6 +1088,7 @@ class R2RDataset(torch_data.Dataset):
                 'scan': [scan],
                 'vp': [None],
                 'input_text': [action + '</s>'],
+                'gt_text': [gt_action + '</s>'],
                 'vis_infos': [None],
                 'input_image': [None],
                 'input_angle_feats': [None],
@@ -1052,6 +1104,8 @@ class R2RDataset(torch_data.Dataset):
             action_id = eval(action[7:-1]) # <walkto12>
             all_adj = self.navigable_loc[scan][vp]
 
+            # all_adj is vp->adjacent viewpoints
+            # candidates index from 0 -> ...
             next_scan = list(all_adj.items())[1:][action_id][-1]
 
             next_vp = next_scan['viewpointId']
@@ -1064,6 +1118,7 @@ class R2RDataset(torch_data.Dataset):
             next_valid_view, _, _ = self.filter_candidate_views(next_valid_view)
 
             text = action + '</s>'
+            gt_text = gt_action + '</s>'
 
             #######################
             history_text = "\nEnvironment: "
@@ -1079,13 +1134,13 @@ class R2RDataset(torch_data.Dataset):
                 )
             history_text += "".join(img_tokens)
             text += history_text
+            gt_text += history_text
             #######################
 
-            # text += "\nEnvironment: " + "".join([
-            #     '<image{}>'.format(x, x) if x in next_valid_view.keys() else ''
-            #     for x in range(12)
-            # ])
             text += "\nAgent: <s>"
+            gt_text += "\nAgent: <s>"
+
+            # infos, image, angle_features
             vis_infos = [(scan, next_vp, next_valid_view)]
             input_image, input_angle_feats = self.get_vis(vis_infos)
 
@@ -1094,6 +1149,7 @@ class R2RDataset(torch_data.Dataset):
                 'scan': [scan],
                 'vp': [next_vp],
                 'input_text': [text],
+                'gt_text': [gt_text],
                 'vis_infos': [vis_infos],
                 'input_image': [input_image],
                 'input_angle_feats': [input_angle_feats],
@@ -1146,8 +1202,11 @@ class R2RDataset(torch_data.Dataset):
             )
         return input_text, vis_infos, paths[-1]
 
-    def update_data(self, index, input_text, vis_infos):
-        pass
+    def update_data(self, index, input_text, gt_text, vis_infos):
+        self.input_text[index] = input_text
+        self.gt_text[index] = gt_text
+        self.vis_infos[index] = vis_infos
+        self.flag[index] = True
 
     def __getitem__(self, index):
         item = self.alldata[index]
@@ -1157,7 +1216,10 @@ class R2RDataset(torch_data.Dataset):
         instruction = self.get_instruction(item)
         gt_paths = item['path']
 
-        input_text, vis_infos, last_vp = self.input_text[index], self.vis_infos[index], self.last_vp[index]
+        input_text = self.input_text[index]
+        gt_text = self.gt_text[index]
+        vis_infos = self.vis_infos[index]
+        last_vp = self.last_vp[index]
 
         input_image, input_angle_feats = self.get_vis(vis_infos)
 
@@ -1170,6 +1232,7 @@ class R2RDataset(torch_data.Dataset):
             'gt_paths': gt_paths,
             'instruction': instruction,
             'input_text': input_text,
+            'gt_text': gt_text,
             'vis_infos': vis_infos,
             'input_image': input_image,
             'input_angle_feats': input_angle_feats,
@@ -1224,12 +1287,8 @@ class DistributedSampler(_DistributedSampler):
         return iter(indices)
 
 
-def build_dataloader(args, dataset, seed=None):
-    batch_size = args.batch_size
-    dist = args.distributed
-    workers = args.workers
-    training = False if args.split != 'train' else True
-    if dist:
+def build_dataloader(dataset, batch_size, distributed, workers, training, seed=None):
+    if distributed:
         if training:
             sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         else:
@@ -1238,10 +1297,7 @@ def build_dataloader(args, dataset, seed=None):
     else:
         sampler = None
 
-    if args.shuffle:
-        shuffle = (sampler is None) and training
-    else:
-        shuffle = False
+    shuffle = (sampler is None) and training
 
     dataloader = DataLoader(
         dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,

@@ -90,8 +90,7 @@ def main():
     )
 
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
-        args=args,
-        dataset=r2r_dataset,
+        dataset=r2r_dataset, batch_size=args.batch_size, distributed=args.distributed, workers=args.workers, training=False
     )
 
     ############# Init #############

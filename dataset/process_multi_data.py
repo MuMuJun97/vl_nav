@@ -525,28 +525,42 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         add_special_tokens=False
     )
 
+    batch_gt_text = tokenizer(
+        batch_dict['gt_text'],
+        max_length=max_length,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+        add_special_tokens=False
+    )
+
     input_ids = batch_text['input_ids']
+    gt_ids = batch_gt_text['input_ids']
     media_locations = (input_ids >= args.image_token_ids[0]) & (input_ids <= args.image_token_ids[-1])
     media_nums = media_locations.sum(dim=-1) # B
 
     for bs in range(batch_size):
-        sample_text = tokenizer(
-            batch_dict['input_text'][bs],
-            return_tensors="pt",
-            add_special_tokens=False
-        )
-        sample_text_length = sample_text['input_ids'].shape[-1]
-        # assert sample_text_length < max_length
-        if sample_text_length >= max_length:
-            media_locations = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
-                              (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
-            media_nums = media_locations.sum()
-            image_mask[bs, media_nums:] = False
+        media_nums = media_nums[bs].sum()
+        image_mask[bs, media_nums:] = False
+
+        # sample_text = tokenizer(
+        #     batch_dict['input_text'][bs],
+        #     return_tensors="pt",
+        #     add_special_tokens=False
+        # )
+        # sample_text_length = sample_text['input_ids'].shape[-1]
+        # # assert sample_text_length < max_length
+        # if sample_text_length >= max_length:
+        #     cc = (batch_text['input_ids'][bs] >= args.image_token_ids[0]) & \
+        #                       (batch_text['input_ids'][bs] <= args.image_token_ids[-1])
+        #     media_nums = cc.sum()
+        #     image_mask[bs, media_nums:] = False
 
     action_space_len = len(args.action_token_ids)
 
     input_ids = batch_text['input_ids']
     labels = torch.zeros_like(input_ids) - 100
+
     if extract_candidates is None:
         # test: not compute labels, train/val: compute labels
         for bs in range(batch_size):
