@@ -143,7 +143,7 @@ def main():
     for epoch in range(resume_from_epoch, args.num_epochs):
         
         # Schedule Sampling
-        cnt_p = args.sampling_p ** epoch
+        cnt_p = args.sampling_p ** (epoch + 1)
         if cnt_p < 1.0:
             r2r_dataset.reinit_dataset(test=True, filter=['r2r', 'soon', 'reverie'])
             r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(

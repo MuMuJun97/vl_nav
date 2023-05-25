@@ -94,7 +94,7 @@ def create_model_and_transforms(
             clip_vision_encoder_path, pretrained=clip_vision_encoder_pretrained
         )
         # set the vision encoder to output the visual features
-        vision_encoder.visual.output_tokens = True
+        vision_encoder.visual.output_tokens = False
 
     text_tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_path, local_files_only=use_local_files
@@ -154,9 +154,7 @@ def create_model_and_transforms(
         lang_encoder,
         text_tokenizer.encode("</s>"+"".join(action_tokens), add_special_tokens=False),
         media_token_id=media_token_id,
-        vis_dim=open_clip.get_model_config(clip_vision_encoder_path)["vision_cfg"][
-            "width"
-        ],
+        vis_dim=512,
         cross_attn_every_n_layers=cross_attn_every_n_layers,
         history_vision=r2r_tok,
         state_token_id=text_tokenizer.encode("<state>")[-1],
