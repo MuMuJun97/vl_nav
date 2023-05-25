@@ -716,8 +716,6 @@ class R2RDataset(torch_data.Dataset):
         }
         return gt_trajs
 
-    def __len__(self):
-        return len(self.alldata)
 
     def load_images(self, scan, vp, valid_ids=None):
         """
@@ -934,7 +932,7 @@ class R2RDataset(torch_data.Dataset):
                 index, view_id = key.split('_')
                 index, view_id = eval(index), eval(view_id)
                 img_tokens.append(
-                    '<image{view_id}>'.format(
+                    '{view_id}.<image> '.format(
                         view_id=view_id if raw_id_order else index
                     )
                 )
@@ -1042,11 +1040,22 @@ class R2RDataset(torch_data.Dataset):
         return input_text, vis_infos, paths[-1]      
 
     def get_valid_action(self, scan, vp, heading):
-        assert False
         valid_view = self.compute_angle_features(
             candidates=self.navigable_loc[scan][vp],
             heading=heading,
         )
+        valid_view, valid_view_ids, valid_vps = self.filter_candidate_views(valid_view)
+        valid_action = []
+        for key, value in valid_view.items():
+            index, view_id = key.split('_')
+            index, view_id = eval(index), eval(view_id)
+            valid_action.append(
+                '<walkto{view_id}>'.format(
+                    view_id=view_id if raw_id_order else index
+                )
+            )
+        valid_action.append('<stop>')
+        return valid_action
 
     def make_equiv_action(self, scan, vp, action, batch_dict, target_vp, p=0.0):
         """
@@ -1128,7 +1137,7 @@ class R2RDataset(torch_data.Dataset):
                 index, view_id = key.split('_')
                 index, view_id = eval(index), eval(view_id)
                 img_tokens.append(
-                    '<image{view_id}>'.format(
+                    '{view_id}.<image> '.format(
                         view_id=view_id if raw_id_order else index
                     )
                 )
@@ -1207,6 +1216,9 @@ class R2RDataset(torch_data.Dataset):
         self.gt_text[index] = gt_text
         self.vis_infos[index] = vis_infos
         self.flag[index] = True
+
+    def __len__(self):
+        return len(self.alldata)
 
     def __getitem__(self, index):
         item = self.alldata[index]

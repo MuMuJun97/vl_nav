@@ -104,7 +104,7 @@ def create_model_and_transforms(
 
     if r2r_tok:
         # add <walkto0-15>
-        action_tokens = ['<image{}>'.format(x) for x in range(nums)] \
+        action_tokens = ['<image>'] \
                         + ['<walkto{}>'.format(_) for _ in range(nums)] + ['<stop>']
         media_token_id = None
     else:
@@ -145,7 +145,7 @@ def create_model_and_transforms(
     # cross_attn_every_n_layers: multi-modal cross fusion layer.
 
     if r2r_tok:
-        image_tokens = ['<image{}>'.format(x) for x in range(nums)]
+        image_tokens = ['<image>']
         media_token_id = text_tokenizer.encode(
             "".join(image_tokens), add_special_tokens=False
         )

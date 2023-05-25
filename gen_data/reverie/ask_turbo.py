@@ -126,9 +126,11 @@ class Rewriter(threading.Thread):
                     time.sleep(20)
 
 
-path = '/mnt/lustre/huangshijia.p/MM/vl_nav/data/REVERIE/REVERIE_train.json'
+path = '/mnt/lustre/huangshijia.p/MM/vl_nav/data/SOON/annotations/iccv21_new_released/train.json'
 with open(path, 'rb') as f:
   in_data = json.load(f)
+
+import pdb;pdb.set_trace()
 
 all_data = []
 idx = -1
