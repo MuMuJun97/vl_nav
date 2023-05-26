@@ -31,6 +31,28 @@ def load_r2r_data(anno_file):
             sample_index += 1
     return new_data
 
+def load_sqa_data(anno_file):
+    # assert anno_file.exists()
+    data = []
+    with open(str(anno_file)) as f:
+        for line in f:
+            data.append(json.loads(line))
+    new_data = []
+    sample_index = 0
+    for i, item in enumerate(data):
+        # Split multiple instructions into separate entries
+        for j, (q,a) in enumerate(item['qa']):
+            new_item = dict(item)
+            new_item['raw_idx'] = i
+            new_item['sample_idx'] = sample_index
+            new_item['instr_id'] = sample_index
+            new_item['instruction'] = q
+            new_item['text'] = {0: a}
+            del new_item['qa']
+            new_item['data_type'] = 'sqa'
+            new_data.append(new_item)
+            sample_index += 1
+    return new_data
 
 def load_reverie_data(anno_file):
     # assert anno_file.exists()
@@ -412,6 +434,10 @@ def generate_data_indexs(data):
         alldata += data['cvdn']
         end_index += len(data['cvdn'])
         all_index.update({i: 'cvdn' for i in range(start_index, end_index)})
+    if 'sqa' in data.keys():
+        alldata += data['sqa']
+        end_index += len(data['sqa'])
+        all_index.update({i: 'sqa' for i in range(start_index, end_index)})
     return alldata, all_index
 
 
@@ -663,5 +689,5 @@ if __name__ == '__main__':
     # reverie_data = load_reverie_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/REVERIE/REVERIE_train.json')
     # 10290
     # eqa_data = load_eqa_data(anno_file='/mnt/lustre/huangshijia.p/MM/vl_nav/data/mp3d/mp3d_eqa_dict.json')
- 
+    sqa_data = load_sqa_data('/mnt/lustre/huangshijia.p/MM/playground/soon/soon_qa_v1.jsonl')
     import pdb;pdb.set_trace()

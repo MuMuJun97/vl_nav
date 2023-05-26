@@ -42,7 +42,7 @@ torchrun --nnodes=1 --nproc_per_node=8 r2r_eval.py \
 
 torchrun --nnodes=1 --nproc_per_node=8 r2r_test.py \
 --tokenizer_path /mnt/lustre/huangshijia.p/LLAMA_7B \
---run_name samping2 \
+--run_name baseline1 \
 --cfg_file tools/cfgs/datasets/s2_r2r_dataset.yaml \
 --batch_size 1 \
 --learning_rate 5e-5 \
