@@ -8,7 +8,7 @@ import numpy as np
 import networkx as nx
 from pathlib import Path
 import cv2
-
+import ast
 
 def load_r2r_data(anno_file):
     # assert anno_file.exists()
@@ -111,6 +111,23 @@ def load_soon_data(anno_file):
 
 
 def load_fr2r_data(anno_file):
+    """
+    Args:
+        anno_file:
+
+    Returns:
+        new_item:
+            chunk_view/sub_path: [[1, 3], [3, 4], [4, 6], [6, 6]]
+            new_item['instruction']:
+                'Walk between the columns and make a sharp turn right. Walk down the steps and stop on the landing. '
+            new_item['sub_paths']:
+                {'af3af33b0120469c9a00daa0d0b36799': 'walk between the column',
+                 '5be145994f974347850a48cecd04cdcd': 'walk between the column',
+                 '79aedad1206b4eea9c4b639ea2182eb7': 'make a sharp turn right',
+                 '1c91ed40af2246f2b126dd0f661970df': 'walk down the step',
+                 '385019f5d018430fa233d483b253076c': 'walk down the step',
+                 'fd263d778b534f798d0e1ae48886e5f3': 'stop on the landing'}
+    """
     assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)
@@ -122,8 +139,23 @@ def load_fr2r_data(anno_file):
             new_item['instr_id'] = '%s_%d' % (item['path_id'], j)
             new_item['instruction'] = instr
             del new_item['instructions']
-            del new_item['instr_encodings']
             new_item['data_type'] = 'fr2r'
+
+            new_instructions = ast.literal_eval(new_item['new_instructions'])
+            new_instrs = new_instructions[j]
+
+            for ni, n_str in enumerate(new_instrs):
+                if 'and' in n_str:
+                    new_instrs[ni] = new_instrs[ni][1:]
+                new_instrs[ni] = " ".join(new_instrs[ni])
+
+            sub_paths = dict()
+            chunk_view = item['chunk_view'][j]
+            for ci, cv in enumerate(chunk_view):
+                for p_i in range(cv[0]-1, cv[1]):
+                    sub_paths[new_item['path'][p_i]] = new_instrs[ci]
+
+            new_item['sub_paths'] = sub_paths
             new_data.append(new_item)
     return new_data
 

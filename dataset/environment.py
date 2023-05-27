@@ -779,11 +779,15 @@ class R2RDataset(torch_data.Dataset):
             viewIndex = heading_step + headingCount
         return viewIndex,state_heading,elevation
 
-    def compute_angle_features(self, candidates: dict, heading: float):
+    def compute_angle_features(self, candidates: dict, heading: float, view_nums: int = 12, use_panoramic: bool = True):
         """
         Args:
             candidates: candidate viewpoints, dict{}
             heading: float, current viewpoint->heading
+            view_nums:
+            use_panoramic:
+                True: add panoramic images (12 views) to valid_view
+                False: only candidate image views
 
         Returns:
             valid_view: key is `{index}_{view_id}`
@@ -794,12 +798,15 @@ class R2RDataset(torch_data.Dataset):
         cur_vp = candidates[list(candidates.keys())[0]]
 
         key_id = 0
+        view_id_set = set()
         for vp, candidate in candidates.items():
             if vp == cur_vp['viewpointId']:
                 continue
+
             key = '{index}_{view_id}'.format(index=key_id, view_id=candidate['pointId'])
             if valid_view.get(key, None) is None:
                 valid_view[key] = dict()
+            view_id_set.add(candidate['pointId'])
 
             # "normalized_heading": state.heading + loc.rel_heading
             normalized_heading = candidate['normalized_heading']
@@ -815,6 +822,29 @@ class R2RDataset(torch_data.Dataset):
                 'viewpointId': candidate['viewpointId'],
             })
             key_id += 1
+        if use_panoramic:
+            for index in range(view_nums):
+                if index in view_id_set:
+                    continue
+                key = '{index}_{view_id}'.format(index=key_id, view_id=index)
+                if valid_view.get(key, None) is None:
+                    valid_view[key] = dict()
+
+                # "normalized_heading": state.heading + loc.rel_heading
+                normalized_heading = (index % 12) * math.radians(30)
+                adj_heading = normalized_heading - base_heading
+
+                adj_angle_feature = np.array(
+                    [math.sin(adj_heading), math.cos(adj_heading)],
+                    dtype=np.float32
+                )
+
+                valid_view[key].update({
+                    'angle_feats': adj_angle_feature,
+                    'viewpointId': None,
+                })
+                key_id += 1
+
         return valid_view
 
     def get_vis(self, vis_infos):
