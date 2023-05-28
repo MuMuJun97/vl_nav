@@ -88,7 +88,7 @@ def main():
         tokenizer=tokenizer,
         test=False
     )
-    cc = r2r_dataset.__getitem__(0)
+
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
         dataset=r2r_dataset, batch_size=args.batch_size, distributed=args.distributed, workers=args.workers, training=True
     )

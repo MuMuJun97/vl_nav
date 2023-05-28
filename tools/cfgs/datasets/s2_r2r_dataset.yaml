@@ -8,7 +8,7 @@ Dataset:
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['R2R', 'REVERIE'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN"
+  SOURCE: ['R2R', 'SOON', 'CVDN', 'REVERIE'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN"
   
   SOON:
     DIR: "data/SOON/annotations/iccv21_new_released" # train.json
