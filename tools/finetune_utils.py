@@ -782,8 +782,8 @@ def inference(
 
 def get_tokenizer_token_ids(tokenizer):
     nums = 16
-    image_tokens = ['<image{}>'.format(x) for x in range(nums)]
-    action_tokens = ['<walkto{}>'.format(_) for _ in range(nums)] + ['<stop>']
+    image_tokens = ['<image>']
+    action_tokens = ['<stop>'] + ['<walkto{}>'.format(_) for _ in range(nums)]
     image_token_ids = tokenizer.encode(
         "".join(image_tokens),add_special_tokens=False
     )

@@ -102,18 +102,13 @@ def create_model_and_transforms(
     )
     # add Flamingo special tokens to the tokenizer
 
-    if r2r_tok:
-        # add <walkto0-15>
-        action_tokens = ['<image{}>'.format(x) for x in range(nums)] \
-                        + ['<walkto{}>'.format(_) for _ in range(nums)] + ['<stop>']
-        media_token_id = None
-    else:
-        action_tokens = ["<|endofchunk|>", "<image>", "<state>"]
-        media_token_id = text_tokenizer.encode("<image>")[-1]
-
+    action_tokens =  ['<stop>'] + ['<walkto{}>'.format(_) for _ in range(nums)]
+    img_tokens = ['<im>']
     text_tokenizer.add_special_tokens(
-        {"additional_special_tokens": action_tokens}
+        {"additional_special_tokens": action_tokens + ['<abos>', '<sbos>', '<image>']}
     )
+    media_token_id = text_tokenizer.encode("<image><abos><stop>", add_special_tokens=False)
+
     if text_tokenizer.pad_token is None:
         # Issue: GPT models don't have a pad token, which we use to
         # modify labels for the loss.
@@ -134,21 +129,13 @@ def create_model_and_transforms(
     lang_encoder.set_decoder_layers_attr_name(decoder_layers_attr_name)
     lang_encoder.resize_token_embeddings(len(text_tokenizer))
 
-    if flamingo_kwargs.get('unfreeze_llm',None) is not None:
+    if flamingo_kwargs.get('unfreeze_llm', None) is not None:
         unfreeze_llm = flamingo_kwargs['unfreeze_llm']
         flamingo_kwargs.pop('unfreeze_llm')
     else:
         unfreeze_llm = False
 
     lang_encoder = lang_encoder.bfloat16()
-    # TODO ? endofchunk: how to modify?
-    # cross_attn_every_n_layers: multi-modal cross fusion layer.
-
-    if r2r_tok:
-        image_tokens = ['<image{}>'.format(x) for x in range(nums)]
-        media_token_id = text_tokenizer.encode(
-            "".join(image_tokens), add_special_tokens=False
-        )
 
     model = Flamingo(
         vision_encoder,

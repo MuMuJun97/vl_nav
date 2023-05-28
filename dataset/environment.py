@@ -25,7 +25,8 @@ from dataset.process_multi_data import (
     load_fr2r_data,load_reverie_data,
     generate_data_indexs,
     generate_graphs,load_nav_graphs,
-    load_eqa_data, load_cvdn_data
+    load_eqa_data, load_cvdn_data,
+    load_sqa_data
 )
 from tools.common_utils import all_gather
 
@@ -604,6 +605,10 @@ class R2RDataset(torch_data.Dataset):
                 _anno_file = _root_dir/config.CVDN.DIR/config.CVDN.SPLIT[self.split]
                 self.data['cvdn'] = load_cvdn_data(anno_file=_anno_file, shortest_paths=self.shortest_paths)
                 msg += '\n- Dataset: load {} CVDN samples'.format(len(self.data['cvdn']))
+            elif source == "SQA":
+                _anno_file = '/mnt/lustre/huangshijia.p/MM/playground/soon/soon_qa_v1.jsonl'
+                self.data['sqa'] = load_sqa_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} sqa samples'.format(len(self.data['sqa']))
             else:
                 NotImplementedError
 
@@ -683,7 +688,6 @@ class R2RDataset(torch_data.Dataset):
                     self.vis_infos[index] = data['vis_infos']
                     self.flag[index] = data['flag']
 
-
     def get_navigable_Locations(self):
         """
         :return:
@@ -748,10 +752,10 @@ class R2RDataset(torch_data.Dataset):
             for s in img_12
         ]
         images = torch.cat(images, dim=0)  # [12,3,224,224]
-        if self.training:
-            # apply random horizontal flip and color jitter
-            images = torchvision.transforms.RandomHorizontalFlip(p=0.5)(images)
-            images = torchvision.transforms.ColorJitter(brightness=0.5, hue=0.3)(images)
+        # if self.training:
+        #     # apply random horizontal flip and color jitter
+        #     images = torchvision.transforms.RandomHorizontalFlip(p=0.5)(images)
+        #     images = torchvision.transforms.ColorJitter(brightness=0.5, hue=0.3)(images)
 
         return images
 
@@ -822,14 +826,16 @@ class R2RDataset(torch_data.Dataset):
         input_angle_feats = []
         for (scan, vp, valid_view) in vis_infos:
             images = self.load_images(scan, vp, valid_ids=list(valid_view.keys()))
+            images = torch.cat([torch.zeros_like(images[:1]), images],dim=0)
             input_image.append(images)
 
-            per_angle_feats = []
+            per_angle_feats = [np.array([0.0,0.0]).astype('float32')]
             for k, v in valid_view.items():
                 per_angle_feats.append(v['angle_feats'])
             input_angle_feats.append(torch.from_numpy(
                 np.stack(per_angle_feats)
             ))
+
         input_image = torch.cat(input_image, dim=0)
         input_angle_feats = torch.cat(input_angle_feats, dim=0)
         return input_image, input_angle_feats
@@ -914,7 +920,7 @@ class R2RDataset(torch_data.Dataset):
                 if t in texts:
                     for idx, text in enumerate(texts[t]):
                         if idx % 2 == 0:
-                            history_text += "\nAgent: <s> {} </s>".format(text)
+                            history_text += "\nAgent: <sbos> {} </s>".format(text)
                         else:
                             history_text += "\nCommander: {}".format(text)
                 break
@@ -930,14 +936,10 @@ class R2RDataset(torch_data.Dataset):
             history_text += "\nEnvironment: "
             img_tokens = []
             raw_id_order = False # align with Recurrent VLN-BERT.
-            for key, value in valid_view.items():
-                index, view_id = key.split('_')
-                index, view_id = eval(index), eval(view_id)
-                img_tokens.append(
-                    '<image{view_id}>'.format(
-                        view_id=view_id if raw_id_order else index
-                    )
-                )
+
+            for i in range(len(valid_view)+1):
+                img_tokens.append('<image>')
+    
             history_text += "".join(img_tokens)
             vis_infos.append((scan, vp, valid_view))
 
@@ -945,7 +947,7 @@ class R2RDataset(torch_data.Dataset):
             if t in texts:
                 for idx, text in enumerate(texts[t]):
                     if idx % 2 == 0:
-                        history_text += "\nAgent: <s> {} </s>".format(text)
+                        history_text += "\nAgent: <sbos> {} </s>".format(text)
                     else:
                         history_text += "\nCommander: {}".format(text)
 
@@ -953,7 +955,7 @@ class R2RDataset(torch_data.Dataset):
             if t != trajs_len - 1:
                 next_vp = trajs[t + 1]
                 if next_vp is None:
-                    history_text += "\nAgent: <s><stop></s>"
+                    history_text += "\nAgent: <abos><stop></s>"
                 else:
 
                     if not raw_id_order:
@@ -962,7 +964,7 @@ class R2RDataset(torch_data.Dataset):
                         # this->heading is the base heading of next_viewpoint/location
                         this_heading = navigable_dict[vp][next_vp]['pointId']
                         heading = (this_heading % 12) * math.radians(30)
-                        history_text += "\nAgent: <s><walkto{}></s>".format(next_view_id)
+                        history_text += "\nAgent: <abos><walkto{}></s>".format(next_view_id)
                     else:
                         raise NotImplementedError
 
@@ -991,6 +993,9 @@ class R2RDataset(torch_data.Dataset):
         elif data_type == 'cvdn':
             return 'Find the described target, you can ask for help. Target: ' \
                 + item['instruction']
+        elif data_type == 'sqa':
+            return 'Answer the question based on the environment. Question: ' \
+                + item['instruction']
 
     def get_gt_action(self, scan, vp, target_vp):
         if vp == target_vp:
@@ -1002,7 +1007,6 @@ class R2RDataset(torch_data.Dataset):
 
         # action_id: candidates->index (next viewpoint)
         action_id = candidate_indexs.index(path[1])
-
         return '<walkto{}>'.format(action_id)
 
     def pre_process_test(self, index):
@@ -1038,7 +1042,7 @@ class R2RDataset(torch_data.Dataset):
                 scan=scan,
                 item=item,
             )
-        input_text += "\nAgent: <s>"
+        input_text += "\nAgent: <abos>"
         return input_text, vis_infos, paths[-1]      
 
     def get_valid_action(self, scan, vp, heading):
@@ -1124,21 +1128,16 @@ class R2RDataset(torch_data.Dataset):
             history_text = "\nEnvironment: "
             img_tokens = []
             raw_id_order = False  # align with Recurrent VLN-BERT.
-            for key, value in next_valid_view.items():
-                index, view_id = key.split('_')
-                index, view_id = eval(index), eval(view_id)
-                img_tokens.append(
-                    '<image{view_id}>'.format(
-                        view_id=view_id if raw_id_order else index
-                    )
-                )
+            for i in range(len(next_valid_view)+1):
+                img_tokens.append('<image>')
+
             history_text += "".join(img_tokens)
             text += history_text
             gt_text += history_text
             #######################
 
-            text += "\nAgent: <s>"
-            gt_text += "\nAgent: <s>"
+            text += "\nAgent: <abos>"
+            gt_text += "\nAgent: <abos>"
 
             # infos, image, angle_features
             vis_infos = [(scan, next_vp, next_valid_view)]
@@ -1185,10 +1184,11 @@ class R2RDataset(torch_data.Dataset):
         paths = item['path'] + [None]
 
         if data_type == 'eqa':
-            # TODO validate correctness
             texts = {k+1:v for k,v in item['texts'].items()}
-
         if data_type == 'cvdn':
+            texts = item['texts']
+        if data_type == 'sqa':
+            paths = paths[:-1]
             texts = item['texts']
 
         input_text, vis_infos \

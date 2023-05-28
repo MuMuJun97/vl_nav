@@ -10,6 +10,31 @@ from pathlib import Path
 import cv2
 
 
+def load_sqa_data(anno_file):
+    # assert anno_file.exists()
+    data = []
+    with open(str(anno_file)) as f:
+        for line in f:
+            data.append(json.loads(line))
+    new_data = []
+    sample_index = 0
+    for i, item in enumerate(data):
+        # Split multiple instructions into separate entries
+        for j, (q,a) in enumerate(item['qa']):
+            new_item = dict(item)
+            new_item['raw_idx'] = i
+            new_item['path'] = [item['path']]
+            new_item['sample_idx'] = sample_index
+            new_item['instr_id'] = sample_index
+            new_item['instruction'] = q
+            new_item['texts'] = {0: [a]}
+            del new_item['qa']
+            new_item['data_type'] = 'sqa'
+            new_data.append(new_item)
+            sample_index += 1
+    return new_data
+
+
 def load_r2r_data(anno_file):
     # assert anno_file.exists()
     with open(str(anno_file)) as f:
@@ -412,6 +437,10 @@ def generate_data_indexs(data):
         alldata += data['cvdn']
         end_index += len(data['cvdn'])
         all_index.update({i: 'cvdn' for i in range(start_index, end_index)})
+    if 'sqa' in data.keys():
+        alldata += data['sqa']
+        end_index += len(data['sqa'])
+        all_index.update({i: 'sqa' for i in range(start_index, end_index)})
     return alldata, all_index
 
 
@@ -536,8 +565,10 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
 
     input_ids = batch_text['input_ids']
     gt_ids = batch_gt_text['input_ids']
+    start_token = tokenizer.encode('<abos><sbos>',add_special_tokens=False)
     media_locations = (input_ids >= args.image_token_ids[0]) & (input_ids <= args.image_token_ids[-1])
     media_nums = media_locations.sum(dim=-1) # B
+    # batch_text['attention_mask'][media_locations] = 0
 
     for bs in range(batch_size):
         media_nums = media_nums[bs].sum()
@@ -566,7 +597,7 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         for bs in range(batch_size):
             sample_text = input_ids[bs]
             # Task-description contains <walkto0>...<walkto11><stop>, remove!
-            start_locs = torch.nonzero(sample_text == 1,as_tuple=True)[0].tolist()
+            start_locs = torch.nonzero((sample_text == start_token[0]) | (sample_text == start_token[1]), as_tuple=True)[0].tolist()
             end_locs = torch.nonzero(sample_text == 2,as_tuple=True)[0].tolist()
             if len(end_locs) < len(start_locs):
                 end_locs.append(len(sample_text) - 1)
@@ -595,10 +626,10 @@ def batch_process_text(batch_dict, tokenizer, max_length, args, image_mask, extr
         end_loc = media_locs[-1]
         # <image0> + 12 --> <walkto0>
         candidates = input_ids[0, st_loc:end_loc+1] + len(args.image_token_ids)
-
         # add <stop>
         stop_token_id = tokenizer("<stop>",add_special_tokens=False)['input_ids'][-1]
-        candidates = torch.cat([candidates, torch.tensor([stop_token_id])])
+        candidates = [stop_token_id + i for i in range(len(media_locs))]
+        candidates = torch.Tensor(candidates).long()
 
         return input_ids, batch_text['attention_mask'], labels, image_mask, candidates
 

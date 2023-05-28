@@ -4,7 +4,8 @@ import torch.nn as nn
 
 from .helpers import GatedCrossAttentionBlock
 from .utils import getattr_recursive, setattr_recursive
-
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
 
 class FlamingoLMMixin(nn.Module):
     """
@@ -38,7 +39,7 @@ class FlamingoLMMixin(nn.Module):
         Initialize Flamingo by adding a new gated cross attn to the decoder.
         Store the media token id for computing the media locations.
         """
-
+        self.action_head = nn.Linear(4096, 1)
         self.media_token_id = media_token_id
         self.initialized_flamingo = True
         self.state_token_id = state_token_id
@@ -51,22 +52,68 @@ class FlamingoLMMixin(nn.Module):
             )
 
         # if kwargs["past_key_values"] is None:
-        input_ids = kwargs["input_ids"] if "input_ids" in kwargs else input[0]
+        input_ids = kwargs["input_ids"] if "input_ids" in kwargs else input[0] # B,L
+        seq_len = input_ids.shape[1]
+        bs = input_ids.shape[0]
 
-        if isinstance(self.media_token_id, int):
-            media_locations = input_ids == self.media_token_id
-        elif isinstance(self.media_token_id, list):
-            media_locations = (input_ids >= self.media_token_id[0]) & \
-                                (input_ids <= self.media_token_id[-1])
+        media_locations = (input_ids == self.media_token_id[0])
+
+        # <img><action-bos><lang-bos></s>
+        token_shortcuts = []
+        for media_location, input_id in zip(media_locations, input_ids):
+            special_locations = media_location | (input_id == self.media_token_id[1])
+            special_locations = special_locations.nonzero().squeeze()
+            token_shortcut = {}
+            beg = 0
+            end = 0
+            for location in special_locations:
+                if input_id[location] == self.media_token_id[1]:
+                    token_shortcut[location.item()-seq_len] = (beg, end)
+                    beg = end
+                else:
+                    end += 1
+            token_shortcuts.append(token_shortcut)
 
         inputs_embeds = self.model.embed_tokens(input_ids)
         inputs_embeds[media_locations] += self.vis_x
         kwargs["input_ids"] = None
         kwargs["inputs_embeds"] = inputs_embeds
+    
+        labels = None
+        if 'labels' in kwargs:
+            labels = kwargs.pop('labels')
+        outputs = self.model(*input, **kwargs)
+        hidden_states = outputs[0]
+        logits = self.lm_head(hidden_states)
 
-        return super().forward(
-            *input, **kwargs
-        )  # Call the other parent's forward method
+        for idx in range(bs):
+            token_shortcut = token_shortcuts[idx]
+            action_logit = self.action_head(hidden_states[idx][media_locations[idx]]).squeeze()
+            for shortcut in token_shortcut:
+                sa, sb = token_shortcut[shortcut]
+                sn = sb - sa
+                logits[idx][shortcut][self.media_token_id[2]:self.media_token_id[2]+sn] += action_logit[sa:sb]
+
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
 
     def is_conditioned(self) -> bool:
         return True
