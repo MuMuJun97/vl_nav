@@ -272,7 +272,7 @@ def main():
         torch.cuda.set_device(args.local_rank)
     else:
         rank = 0
-
+    torch.cuda.set_device(rank)
     set_random_seed(args.seed + rank)
     train_env, val_envs, aug_env = build_dataset(args, rank=rank, is_test=args.test)
 

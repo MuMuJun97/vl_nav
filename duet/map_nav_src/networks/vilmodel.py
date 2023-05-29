@@ -528,7 +528,7 @@ class LocalVPEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.vp_pos_embeddings = nn.Sequential(
-            nn.Linear(config.angle_feat_size*2 + 6, config.hidden_size),
+            nn.Linear(config.angle_feat_size*2, config.hidden_size),
             BertLayerNorm(config.hidden_size, eps=1e-12)
         )
         self.encoder = CrossmodalEncoder(config)
@@ -558,92 +558,7 @@ class LocalVPEncoder(nn.Module):
         vp_embeds = self.encoder(txt_embeds, txt_masks, vp_embeds, vp_masks)
         return vp_embeds
 
-class GlobalMapEncoder(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.gmap_pos_embeddings = nn.Sequential(
-            nn.Linear(config.angle_feat_size + 3, config.hidden_size),
-            BertLayerNorm(config.hidden_size, eps=1e-12)
-        )
-        self.gmap_step_embeddings = nn.Embedding(config.max_action_steps, config.hidden_size)
-        self.encoder = CrossmodalEncoder(config)
-        
-        if config.graph_sprels:
-            self.sprel_linear = nn.Linear(1, 1)
-        else:
-            self.sprel_linear = None
 
-    def _aggregate_gmap_features(
-        self, split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids
-    ):
-        batch_size = len(split_traj_embeds)
-        device = split_traj_embeds[0].device
-
-        batch_gmap_img_fts = []
-        for i in range(batch_size):
-            visited_vp_fts, unvisited_vp_fts = {}, {}
-            vp_masks = gen_seq_masks(split_traj_vp_lens[i])
-            max_vp_len = max(split_traj_vp_lens[i])
-            i_traj_embeds = split_traj_embeds[i][:, :max_vp_len] * vp_masks.unsqueeze(2)
-            for t in range(len(split_traj_embeds[i])):
-                visited_vp_fts[traj_vpids[i][t]] = torch.sum(i_traj_embeds[t], 0) / split_traj_vp_lens[i][t]
-                for j, vp in enumerate(traj_cand_vpids[i][t]):
-                    if vp not in visited_vp_fts:
-                        unvisited_vp_fts.setdefault(vp, [])
-                        unvisited_vp_fts[vp].append(i_traj_embeds[t][j])
-
-            gmap_img_fts = []
-            for vp in gmap_vpids[i][1:]:
-                if vp in visited_vp_fts:
-                    gmap_img_fts.append(visited_vp_fts[vp])
-                else:
-                    gmap_img_fts.append(torch.mean(torch.stack(unvisited_vp_fts[vp], 0), 0))
-            gmap_img_fts = torch.stack(gmap_img_fts, 0)
-            batch_gmap_img_fts.append(gmap_img_fts)
-
-        batch_gmap_img_fts = pad_tensors_wgrad(batch_gmap_img_fts)
-        # add a [stop] token at beginning
-        batch_gmap_img_fts = torch.cat(
-            [torch.zeros(batch_size, 1, batch_gmap_img_fts.size(2)).to(device), batch_gmap_img_fts], 
-            dim=1
-        )
-        return batch_gmap_img_fts
-    
-    def gmap_input_embedding(
-        self, split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids,
-        gmap_step_ids, gmap_pos_fts, gmap_lens
-    ):
-        gmap_img_fts = self._aggregate_gmap_features(
-            split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids
-        )
-        gmap_embeds = gmap_img_fts + \
-                      self.gmap_step_embeddings(gmap_step_ids) + \
-                      self.gmap_pos_embeddings(gmap_pos_fts)
-        gmap_masks = gen_seq_masks(gmap_lens)
-        return gmap_embeds, gmap_masks
-
-    def forward(
-        self, txt_embeds, txt_masks,
-        split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids,
-        gmap_step_ids, gmap_pos_fts, gmap_lens, graph_sprels=None
-    ):
-        gmap_embeds, gmap_masks = self.gmap_input_embedding(
-            split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids,
-            gmap_step_ids, gmap_pos_fts, gmap_lens
-        )
-        
-        if self.sprel_linear is not None:
-            graph_sprels = self.sprel_linear(graph_sprels.unsqueeze(3)).squeeze(3).unsqueeze(1)
-        else:
-            graph_sprels = None
-
-        gmap_embeds = self.encoder(
-            txt_embeds, txt_masks, gmap_embeds, gmap_masks,
-            graph_sprels=graph_sprels
-        )
-        return gmap_embeds
-       
-    
 class ClsPrediction(nn.Module):
     def __init__(self, hidden_size, input_size=None):
         super().__init__()
@@ -666,35 +581,13 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         self.img_embeddings = ImageEmbeddings(config)
         
         self.local_encoder = LocalVPEncoder(config)
-        self.global_encoder = GlobalMapEncoder(config)
 
-        self.global_sap_head = ClsPrediction(self.config.hidden_size)
         self.local_sap_head = ClsPrediction(self.config.hidden_size)
-        if config.glocal_fuse:
-            self.sap_fuse_linear = ClsPrediction(self.config.hidden_size, input_size=self.config.hidden_size*2)
-        else:
-            self.sap_fuse_linear = None
         if self.config.obj_feat_size > 0:
             self.og_head = ClsPrediction(self.config.hidden_size)
         
         self.init_weights()
         
-        if config.fix_lang_embedding or config.fix_local_branch:
-            for k, v in self.embeddings.named_parameters():
-                v.requires_grad = False
-            for k, v in self.lang_encoder.named_parameters():
-                v.requires_grad = False
-        if config.fix_pano_embedding or config.fix_local_branch:
-            for k, v in self.img_embeddings.named_parameters():
-                v.requires_grad = False
-        if config.fix_local_branch:
-            for k, v in self.local_encoder.named_parameters():
-                v.requires_grad = False
-            for k, v in self.local_sap_head.named_parameters():
-                v.requires_grad = False
-            for k, v in self.og_head.named_parameters():
-                v.requires_grad = False
-    
     def forward_text(self, txt_ids, txt_masks):
         txt_token_type_ids = torch.zeros_like(txt_ids)
         txt_embeds = self.embeddings(txt_ids, token_type_ids=txt_token_type_ids)
@@ -748,70 +641,20 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         return pano_embeds, pano_masks
 
     def forward_navigation_per_step(
-        self, txt_embeds, txt_masks, gmap_img_embeds, gmap_step_ids, gmap_pos_fts, 
-        gmap_masks, gmap_pair_dists, gmap_visited_masks, gmap_vpids,
+        self, txt_embeds, txt_masks, 
         vp_img_embeds, vp_pos_fts, vp_masks, vp_nav_masks, vp_obj_masks, vp_cand_vpids,
     ):
         batch_size = txt_embeds.size(0)
-
-        # global branch
-        gmap_embeds = gmap_img_embeds + \
-                      self.global_encoder.gmap_step_embeddings(gmap_step_ids) + \
-                      self.global_encoder.gmap_pos_embeddings(gmap_pos_fts)
-
-        if self.global_encoder.sprel_linear is not None:
-            graph_sprels = self.global_encoder.sprel_linear(
-                gmap_pair_dists.unsqueeze(3)).squeeze(3).unsqueeze(1)
-        else:
-            graph_sprels = None
-
-        gmap_embeds = self.global_encoder.encoder(
-            txt_embeds, txt_masks, gmap_embeds, gmap_masks,
-            graph_sprels=graph_sprels
-        )
        
         # local branch
         vp_embeds = vp_img_embeds + self.local_encoder.vp_pos_embeddings(vp_pos_fts)
         vp_embeds = self.local_encoder.encoder(txt_embeds, txt_masks, vp_embeds, vp_masks)
             
         # navigation logits
-        if self.sap_fuse_linear is None:
-            fuse_weights = 0.5
-        else:
-            fuse_weights = torch.sigmoid(self.sap_fuse_linear(
-                torch.cat([gmap_embeds[:, 0], vp_embeds[:, 0]], 1)
-            ))
-        # print(fuse_weights)
-
-        global_logits = self.global_sap_head(gmap_embeds).squeeze(2) * fuse_weights
-        global_logits.masked_fill_(gmap_visited_masks, -float('inf'))
-        global_logits.masked_fill_(gmap_masks.logical_not(), -float('inf'))
-        # print('global', torch.softmax(global_logits, 1)[0], global_logits[0])
-
+        fuse_weights = 0.5
         local_logits = self.local_sap_head(vp_embeds).squeeze(2) * (1 - fuse_weights)
         local_logits.masked_fill_(vp_nav_masks.logical_not(), -float('inf'))
         # print('local', torch.softmax(local_logits, 1)[0], local_logits[0])
-
-        # fusion
-        fused_logits = torch.clone(global_logits)
-        fused_logits[:, 0] += local_logits[:, 0]   # stop
-        for i in range(batch_size):
-            visited_nodes = set([vp for vp, mask in zip(gmap_vpids[i], gmap_visited_masks[i]) if mask])
-            tmp = {}
-            bw_logits = 0
-            for j, cand_vpid in enumerate(vp_cand_vpids[i]):
-                if j > 0:
-                    if cand_vpid in visited_nodes:
-                        bw_logits += local_logits[i, j]
-                    else:
-                        tmp[cand_vpid] = local_logits[i, j]
-            for j, vp in enumerate(gmap_vpids[i]):
-                if j > 0 and vp not in visited_nodes:
-                    if vp in tmp:
-                        fused_logits[i, j] += tmp[vp]
-                    else:
-                        fused_logits[i, j] += bw_logits
-        # print('fused', torch.softmax(fused_logits, 1)[0], fused_logits[0])
 
         # object grounding logits
         if vp_obj_masks is not None:
@@ -821,11 +664,8 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             obj_logits = None
 
         outs = {
-            'gmap_embeds': gmap_embeds,
             'vp_embeds': vp_embeds,
-            'global_logits': global_logits,
             'local_logits': local_logits,
-            'fused_logits': fused_logits,
             'obj_logits': obj_logits,
         }
         return outs
@@ -844,9 +684,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
 
         elif mode == 'navigation':
              return self.forward_navigation_per_step(
-                batch['txt_embeds'], batch['txt_masks'], batch['gmap_img_embeds'], 
-                batch['gmap_step_ids'], batch['gmap_pos_fts'], batch['gmap_masks'],
-                batch['gmap_pair_dists'], batch['gmap_visited_masks'], batch['gmap_vpids'], 
+                batch['txt_embeds'], batch['txt_masks'], 
                 batch['vp_img_embeds'], batch['vp_pos_fts'], batch['vp_masks'],
                 batch['vp_nav_masks'], batch['vp_obj_masks'], batch['vp_cand_vpids'],
             )
