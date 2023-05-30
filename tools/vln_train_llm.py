@@ -9,12 +9,13 @@ import torch.nn as nn
 from tqdm import tqdm
 from models.vln_model import BertVLNModel
 from torch.nn.utils.rnn import pad_sequence
-from duet.map_nav_src.utils.ops import pad_tensors, gen_seq_masks
+from duet.map_nav_src_llm.utils.ops import pad_tensors, gen_seq_masks
 from collections import defaultdict
-from duet.map_nav_src.networks.graph_utils import GraphMap
-from duet.map_nav_src.networks.ops import pad_tensors_wgrad
-from duet.map_nav_src.r2r.eval_utils import cal_dtw
-from duet.map_nav_src.utils.distributed import all_gather
+# from duet.map_nav_src.networks.graph_utils import GraphMap
+from duet.map_nav_src_llm.networks.graph_utils import calculate_vp_rel_pos_fts, get_angle_fts
+from duet.map_nav_src_llm.networks.ops import pad_tensors_wgrad
+from duet.map_nav_src_llm.r2r.eval_utils import cal_dtw
+from duet.map_nav_src_llm.utils.distributed import all_gather
 
 
 class Metrics(object):
@@ -39,6 +40,24 @@ class NavigationAgent(object):
         # buffer
         self.scanvp_cands = {}
 
+    def get_instruction(self, item):
+        data_type = 'r2r' #TODO
+        if data_type == 'r2r':
+            return 'Travel following the instruction, you can not ask for help. Instruction: ' \
+                + item['instruction']
+        elif data_type == 'soon':
+            return 'Find the described target, you can not ask for help. Target: ' \
+                + item['instruction']['instruction']
+        elif data_type == 'reverie':
+            return 'Go to the location to complete the given task, you can not ask for help. Task: ' \
+                + item['instruction']
+        elif data_type == 'eqa':
+            return 'Explore the scene and answer the question, you can not ask for help. Question: ' \
+                          + item['instruction']
+        elif data_type == 'cvdn':
+            return 'Find the described target, you can ask for help. Target: ' \
+                + item['instruction']
+
     def update_scanvp_cands(self, obs):
         for ob in obs:
             scan = ob['scan']
@@ -50,19 +69,8 @@ class NavigationAgent(object):
                 self.scanvp_cands[scanvp][cand['viewpointId']] = cand['pointId']
 
     def language_variable(self, obs):
-        seq_lengths = [len(ob['instr_encoding']) for ob in obs]
-
-        seq_tensor = np.zeros((len(obs), max(seq_lengths)), dtype=np.int64)
-        mask = np.zeros((len(obs), max(seq_lengths)), dtype=np.bool)
-        for i, ob in enumerate(obs):
-            seq_tensor[i, :seq_lengths[i]] = ob['instr_encoding']
-            mask[i, :seq_lengths[i]] = True
-
-        seq_tensor = torch.from_numpy(seq_tensor).long().cuda()
-        mask = torch.from_numpy(mask).cuda()
-        return {
-            'txt_ids': seq_tensor, 'txt_masks': mask
-        }
+        raw_instruction = [self.get_instruction(ob) for ob in obs]
+        return {'instruction': raw_instruction}
 
     def panorama_feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
@@ -109,82 +117,22 @@ class NavigationAgent(object):
             'cand_vpids': batch_cand_vpids,
         }
 
-    def nav_gmap_variable(self, obs, gmaps):
-        # [stop] + gmap_vpids
-        batch_size = len(obs)
-
-        batch_gmap_vpids, batch_gmap_lens = [], []
-        batch_gmap_img_embeds, batch_gmap_step_ids, batch_gmap_pos_fts = [], [], []
-        batch_gmap_pair_dists, batch_gmap_visited_masks = [], []
-        batch_no_vp_left = []
-        for i, gmap in enumerate(gmaps):
-            visited_vpids, unvisited_vpids = [], []
-            for k in gmap.node_positions.keys():
-                if self.args.act_visited_nodes:
-                    if k == obs[i]['viewpoint']:
-                        visited_vpids.append(k)
-                    else:
-                        unvisited_vpids.append(k)
-                else:
-                    if gmap.graph.visited(k):
-                        visited_vpids.append(k)
-                    else:
-                        unvisited_vpids.append(k)
-            batch_no_vp_left.append(len(unvisited_vpids) == 0)
-            if self.args.enc_full_graph:
-                gmap_vpids = [None] + visited_vpids + unvisited_vpids
-                gmap_visited_masks = [0] + [1] * len(visited_vpids) + [0] * len(unvisited_vpids)
-            else:
-                gmap_vpids = [None] + unvisited_vpids
-                gmap_visited_masks = [0] * len(gmap_vpids)
-
-            gmap_step_ids = [gmap.node_step_ids.get(vp, 0) for vp in gmap_vpids]
-            gmap_img_embeds = [gmap.get_node_embed(vp) for vp in gmap_vpids[1:]]
-            gmap_img_embeds = torch.stack(
-                [torch.zeros_like(gmap_img_embeds[0])] + gmap_img_embeds, 0
-            )  # cuda
-
-            gmap_pos_fts = gmap.get_pos_fts(
-                obs[i]['viewpoint'], gmap_vpids, obs[i]['heading'], obs[i]['elevation'],
+    def get_pos_fts(self, cnt_vp, cand_vps, cur_heading, cur_elevation, angle_feat_size=4):
+        # dim=7 (sin(heading), cos(heading), sin(elevation), cos(elevation),
+        #  line_dist, shortest_dist, shortest_step)
+        rel_angles, rel_dists = [], []
+        for vp in cand_vps:
+            rel_heading, rel_elevation, rel_dist = calculate_vp_rel_pos_fts(
+                cnt_vp, vp,
+                base_heading=cur_heading, base_elevation=cur_elevation,
             )
+            rel_angles.append([rel_heading, rel_elevation])
+        rel_angles = np.array(rel_angles).astype(np.float32)
+        rel_ang_fts = get_angle_fts(rel_angles[:, 0], rel_angles[:, 1], angle_feat_size)
+        return rel_ang_fts
 
-            gmap_pair_dists = np.zeros((len(gmap_vpids), len(gmap_vpids)), dtype=np.float32)
-            for i in range(1, len(gmap_vpids)):
-                for j in range(i + 1, len(gmap_vpids)):
-                    gmap_pair_dists[i, j] = gmap_pair_dists[j, i] = \
-                        gmap.graph.distance(gmap_vpids[i], gmap_vpids[j])
 
-            batch_gmap_img_embeds.append(gmap_img_embeds)
-            batch_gmap_step_ids.append(torch.LongTensor(gmap_step_ids))
-            batch_gmap_pos_fts.append(torch.from_numpy(gmap_pos_fts))
-            batch_gmap_pair_dists.append(torch.from_numpy(gmap_pair_dists))
-            batch_gmap_visited_masks.append(torch.BoolTensor(gmap_visited_masks))
-            batch_gmap_vpids.append(gmap_vpids)
-            batch_gmap_lens.append(len(gmap_vpids))
-
-        # collate
-        batch_gmap_lens = torch.LongTensor(batch_gmap_lens)
-        batch_gmap_masks = gen_seq_masks(batch_gmap_lens).cuda()
-        batch_gmap_img_embeds = pad_tensors_wgrad(batch_gmap_img_embeds)
-        batch_gmap_step_ids = pad_sequence(batch_gmap_step_ids, batch_first=True).cuda()
-        batch_gmap_pos_fts = pad_tensors(batch_gmap_pos_fts).cuda()
-        batch_gmap_visited_masks = pad_sequence(batch_gmap_visited_masks, batch_first=True).cuda()
-
-        max_gmap_len = max(batch_gmap_lens)
-        gmap_pair_dists = torch.zeros(batch_size, max_gmap_len, max_gmap_len).float()
-        for i in range(batch_size):
-            gmap_pair_dists[i, :batch_gmap_lens[i], :batch_gmap_lens[i]] = batch_gmap_pair_dists[i]
-        gmap_pair_dists = gmap_pair_dists.cuda()
-
-        return {
-            'gmap_vpids': batch_gmap_vpids, 'gmap_img_embeds': batch_gmap_img_embeds,
-            'gmap_step_ids': batch_gmap_step_ids, 'gmap_pos_fts': batch_gmap_pos_fts,
-            'gmap_visited_masks': batch_gmap_visited_masks,
-            'gmap_pair_dists': gmap_pair_dists, 'gmap_masks': batch_gmap_masks,
-            'no_vp_left': batch_no_vp_left,
-        }
-
-    def nav_vp_variable(self, obs, gmaps, pano_embeds, cand_vpids, view_lens, nav_types):
+    def nav_vp_variable(self, obs, start_pos, pano_embeds, cand_vpids, view_lens, nav_types):
         batch_size = len(obs)
 
         # add [stop] token
@@ -193,19 +141,19 @@ class NavigationAgent(object):
         )
 
         batch_vp_pos_fts = []
-        for i, gmap in enumerate(gmaps):
-            cur_cand_pos_fts = gmap.get_pos_fts(
-                obs[i]['viewpoint'], cand_vpids[i],
+        for i in range(len(obs)):
+            cur_cand_pos_fts = self.get_pos_fts(
+                obs[i]['position'], [cc['position']for cc in obs[i]['candidate']],
                 obs[i]['heading'], obs[i]['elevation']
             )
-            cur_start_pos_fts = gmap.get_pos_fts(
-                obs[i]['viewpoint'], [gmap.start_vp],
+            cur_start_pos_fts = self.get_pos_fts(
+                obs[i]['position'], [start_pos[i]],
                 obs[i]['heading'], obs[i]['elevation']
             )
             # add [stop] token at beginning
-            vp_pos_fts = np.zeros((vp_img_embeds.size(1), 14), dtype=np.float32)
-            vp_pos_fts[:, :7] = cur_start_pos_fts
-            vp_pos_fts[1:len(cur_cand_pos_fts) + 1, 7:] = cur_cand_pos_fts
+            vp_pos_fts = np.zeros((vp_img_embeds.size(1), 8), dtype=np.float32)
+            vp_pos_fts[:, :4] = cur_start_pos_fts
+            vp_pos_fts[1:len(cur_cand_pos_fts)+1, 4:] = cur_cand_pos_fts
             batch_vp_pos_fts.append(torch.from_numpy(vp_pos_fts))
 
         batch_vp_pos_fts = pad_tensors(batch_vp_pos_fts).cuda()
@@ -215,10 +163,11 @@ class NavigationAgent(object):
         return {
             'vp_img_embeds': vp_img_embeds,
             'vp_pos_fts': batch_vp_pos_fts,
-            'vp_masks': gen_seq_masks(view_lens + 1),
+            'vp_masks': gen_seq_masks(view_lens+1),
             'vp_nav_masks': vp_nav_masks,
-            'vp_cand_vpids': [[None] + x for x in cand_vpids],
+            'vp_cand_vpids': [[None]+x for x in cand_vpids],
         }
+
 
     def teacher_action_r4r(
         self, obs, vpids, ended, visited_masks=None, imitation_learning=False, t=None, traj=None
@@ -268,7 +217,8 @@ class NavigationAgent(object):
                             print('scan %s: all vps are searched' % (scan))
         return torch.from_numpy(a).cuda()
 
-    def make_equiv_action(self, a_t, gmaps, obs, traj=None, env=None):
+    # def make_equiv_action(self, a_t, gmaps, obs, traj=None, env=None):
+    def make_equiv_action(self, a_t, obs, traj=None, env=None):
         """
         Interface between Panoramic view and Egocentric view
         It will convert the action panoramic view action a_t to equivalent egocentric view actions for the simulator
@@ -276,7 +226,8 @@ class NavigationAgent(object):
         for i, ob in enumerate(obs):
             action = a_t[i]
             if action is not None:            # None is the <stop> action
-                traj[i]['path'].append(gmaps[i].graph.path(ob['viewpoint'], action))
+                # traj[i]['path'].append(gmaps[i].graph.path(ob['viewpoint'], action))
+                traj[i]['path'].append([action])
                 if len(traj[i]['path'][-1]) == 1:
                     prev_vp = traj[i]['path'][-2][-1]
                 else:
@@ -397,7 +348,7 @@ def rollout(
         feedback,
         train_ml,
         train_rl,
-        nav_agent,
+        nav_agent: NavigationAgent,
         vln_model: BertVLNModel,
         entropy_metric,
 ):
@@ -407,11 +358,6 @@ def rollout(
     nav_agent.update_scanvp_cands(obs)
     batch_size = len(obs)
 
-    # build graph: keep the start viewpoint
-    gmaps = [GraphMap(ob['viewpoint']) for ob in obs]
-    for i, ob in enumerate(obs):
-        gmaps[i].update_graph(ob)
-
     # Record the navigation path
     traj = [{
         'instr_id': ob['instr_id'],
@@ -419,9 +365,16 @@ def rollout(
         'details': {},
     } for ob in obs]
 
+    start_pos = [ob['position'] for ob in obs]
+
     # Language input: txt_ids, txt_masks
     language_inputs = nav_agent.language_variable(obs)
-    txt_embeds = vln_model.vln_bert('language', language_inputs)  # [B, L, D=768]
+    instruction = language_inputs['instruction']
+    history = []
+    hist_vis = []
+    for idx in range(len(instruction)):
+        history.append("")
+        hist_vis.append([])
 
     # Initialization the tracking state
     ended = np.array([False] * batch_size)
@@ -432,59 +385,26 @@ def rollout(
     ml_loss = 0.
 
     for t in range(args.max_action_len):
-        for i, gmap in enumerate(gmaps):
-            if not ended[i]:
-                gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
-
         # graph representation
         pano_inputs = nav_agent.panorama_feature_variable(obs)
-        pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)  # [B, 36, D=768], [B, 36,]
-        avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
-                          torch.sum(pano_masks, 1, keepdim=True)  # [B, D=768]
 
-        for i, gmap in enumerate(gmaps):
-            if not ended[i]:
-                # update visited node
-                i_vp = obs[i]['viewpoint']
-                gmap.update_node_embed(i_vp, avg_pano_embeds[i], rewrite=True)
-                # update unvisited nodes
-                for j, i_cand_vp in enumerate(pano_inputs['cand_vpids'][i]):
-                    if not gmap.graph.visited(i_cand_vp):
-                        gmap.update_node_embed(i_cand_vp, pano_embeds[i, j])
+        pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)
 
         # navigation policy
-        nav_inputs = nav_agent.nav_gmap_variable(obs, gmaps)
-        nav_inputs.update(
+        nav_inputs = \
             nav_agent.nav_vp_variable(
-                obs, gmaps, pano_embeds, pano_inputs['cand_vpids'],
+                obs, start_pos, pano_embeds, pano_inputs['cand_vpids'],
                 pano_inputs['view_lens'], pano_inputs['nav_types'],
             )
-        )
-        nav_inputs.update({
-            'txt_embeds': txt_embeds,
-            'txt_masks': language_inputs['txt_masks'],
-        })
+        nav_inputs['instruction'] = instruction
+        nav_inputs['history'] = history
+        nav_inputs['hist_vis'] = hist_vis
+
         nav_outs = vln_model.vln_bert('navigation', nav_inputs)
 
-        if args.fusion == 'local':
-            nav_logits = nav_outs['local_logits']
-            nav_vpids = nav_inputs['vp_cand_vpids']
-        elif args.fusion == 'global':
-            nav_logits = nav_outs['global_logits']
-            nav_vpids = nav_inputs['gmap_vpids']
-        else:
-            nav_logits = nav_outs['fused_logits']  # output logits
-            nav_vpids = nav_inputs['gmap_vpids']
-
+        nav_logits = nav_outs['local_logits'].float()
+        nav_vpids = nav_inputs['vp_cand_vpids']
         nav_probs = torch.softmax(nav_logits, 1)
-
-        # update graph
-        for i, gmap in enumerate(gmaps):
-            if not ended[i]:
-                i_vp = obs[i]['viewpoint']
-                gmap.node_stop_scores[i_vp] = {
-                    'stop': nav_probs[i, 0].data.item(),
-                }
 
         # Imitation Learning
         if train_ml is not None or feedback == 'gt':
@@ -492,10 +412,10 @@ def rollout(
             if args.dataset == 'r2r':
                 nav_targets = nav_agent.teacher_action_r4r(
                     obs, nav_vpids, ended,
-                    visited_masks=nav_inputs['gmap_visited_masks'] if args.fusion != 'local' else None,
+                    visited_masks=None,
                     imitation_learning=(feedback == 'teacher'), t=t, traj=traj
                 )
-            ml_loss += vln_model.criterion(nav_logits, nav_targets)
+            ml_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
 
         # Determinate the next navigation viewpoint
         if feedback == 'teacher':
@@ -514,6 +434,12 @@ def rollout(
             print(feedback)
             sys.exit('Invalid feedback option')
 
+        for idx in range(len(a_t)):
+            if a_t[idx] == -100:
+                continue
+            history[idx] += '<hist>'
+            hist_vis[idx].append(nav_outs['vp_embeds'][idx][a_t[idx]])
+
         # Determine stop actions
         if feedback == 'teacher' or feedback == 'sample':  # in training
             a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
@@ -523,31 +449,14 @@ def rollout(
         # Prepare environment action
         cpu_a_t = []
         for i in range(batch_size):
-            if a_t_stop[i] or ended[i] or nav_inputs['no_vp_left'][i] or (t == args.max_action_len - 1):
+            if a_t_stop[i] or ended[i] or (t == args.max_action_len - 1):
                 cpu_a_t.append(None)
                 just_ended[i] = True
             else:
                 cpu_a_t.append(nav_vpids[i][a_t[i]])
 
         # Make action and get the new state
-        nav_agent.make_equiv_action(cpu_a_t, gmaps, obs, traj, env=envs)
-        for i in range(batch_size):
-            if (not ended[i]) and just_ended[i]:
-                stop_node, stop_score = None, {'stop': -float('inf')}
-                # @note: comment this -> not add extra stop nodes.
-                # if not comment, sample='gt', sr=0.0, oracle_sr=100.00
-                # =====================================================
-                for k, v in gmaps[i].node_stop_scores.items():
-                    if v['stop'] > stop_score['stop']:
-                        stop_score = v
-                        stop_node = k
-                if stop_node is not None and obs[i]['viewpoint'] != stop_node:
-                    traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
-                # if args.detailed_output:
-                #     for k, v in gmaps[i].node_stop_scores.items():
-                #         traj[i]['details'][k] = {
-                #             'stop_prob': float(v['stop']),
-                #         }
+        nav_agent.make_equiv_action(cpu_a_t, obs, traj, env=envs)
 
         # get new observation and update graph
         obs = []
@@ -560,10 +469,6 @@ def rollout(
             )
         nav_agent.update_scanvp_cands(obs)
 
-        for i, ob in enumerate(obs):
-            if not ended[i]:
-                gmaps[i].update_graph(ob)
-
         ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
 
         # Early exit if all ended
@@ -571,7 +476,7 @@ def rollout(
             break
 
     if train_ml is not None:
-        ml_loss = ml_loss * train_ml / batch_size
+        ml_loss = ml_loss # * train_ml / batch_size
 
     return ml_loss, traj
 

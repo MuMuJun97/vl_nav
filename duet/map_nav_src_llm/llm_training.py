@@ -14,14 +14,14 @@ from tools.parser import read_args, random_seed
 from tools.train.distributed import init_distributed_device
 from open_flamingo import create_model_and_transforms
 from dataset.dataset_src import SrcDataset, build_dataloader
-from duet.map_nav_src.utils.data import ImageFeaturesDB
+from duet.map_nav_src_llm.utils.data import ImageFeaturesDB
 from tools.finetune_utils import (get_tokenizer_token_ids, )
 from tools.train.train_utils import (
     get_grouped_params, check_checkpoint,
     get_checkpoint, save_checkpoint,
 )
-from models.vln_model import VLNModel, BertVLNModel
-from tools.vln_train import vln_train_one_epoch, NavigationAgent, vln_val_one_epoch
+from models.vln_model_llm import VLNModel, BertVLNModel
+from tools.vln_train_llm import vln_train_one_epoch, NavigationAgent, vln_val_one_epoch
 from transformers import get_constant_schedule_with_warmup
 
 
@@ -225,6 +225,8 @@ def main():
             language_model=language_model,
             logger=logger
         )
+
+    ############# Agent: Step & Action #############
     nav_agent = NavigationAgent(
         args=args,
         shortest_distances=r2r_dataset.shortest_distances,
@@ -236,6 +238,7 @@ def main():
             shortest_distances=val_r2r_dataset.shortest_distances,
             shortest_paths=val_r2r_dataset.shortest_paths,
         )
+
 
     total_training_steps = (
                             len(r2r_dataset) // (args.batch_size * args.world_size)

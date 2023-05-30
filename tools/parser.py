@@ -19,10 +19,10 @@ def read_args():
     output_dir = Path(__file__).parent.parent.parent.resolve() / "vl_nav_output"
     parser = argparse.ArgumentParser()
 
-    ############ VLN-Tasks #############
-    parser.add_argument('--feat_dropout', type=float, default=0.3)
-
-
+    ############ VLN-Tasks [VLN-DUET] #############
+    parser.add_argument('--feat_dropout', type=float, default=0.4) # image feature dropout
+    parser.add_argument('--fusion', type=str, default='dynamic')  # ['local', 'global', 'dynamic']
+    parser.add_argument('--lr', type=float, default=1e-5)  # single-gpu, 16 batch size, lr=1e-5
 
     ############# Tasks #############
     # R2R downstream tasks: multi-step inference.
