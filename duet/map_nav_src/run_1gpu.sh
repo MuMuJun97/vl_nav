@@ -1,7 +1,7 @@
-torchrun --nnodes=1 --nproc_per_node=1 r2r/main_nav.py \
+TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nnodes=1 --nproc_per_node=2 r2r/main_nav.py \
 --dataset r2r \
---output_dir ../../../vl_nav_output \
---world_size 8 \
+--output_dir ../../../vl_nav_output_baseline \
+--world_size 2 \
 --seed 0 \
 --tokenizer bert \
 --enc_full_graph --graph_sprels \
@@ -11,7 +11,7 @@ torchrun --nnodes=1 --nproc_per_node=1 r2r/main_nav.py \
 --num_pano_layers 2 \
 --max_action_len 15 \
 --max_instr_len 200 \
---batch_size 16 \
+--batch_size 1 \
 --lr 1e-5 \
 --iters 20000 \
 --log_every 2000 \

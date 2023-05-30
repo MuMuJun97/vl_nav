@@ -22,8 +22,8 @@ class VLNBert(nn.Module):
         batch = collections.defaultdict(lambda: None, batch)
         
         if mode == 'language':            
-            txt_embeds = self.vln_bert(mode, batch)
-            return txt_embeds
+            self.vln_bert(mode, batch)
+            return
 
         elif mode == 'panorama':
             batch['view_img_fts'] = self.drop_env(batch['view_img_fts'])

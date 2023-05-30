@@ -32,21 +32,28 @@ class GMapNavAgent(Seq2SeqAgent):
         self.critic = Critic(self.args).cuda()
         # buffer
         self.scanvp_cands = {}
+    
+    def get_instruction(self, item):
+        data_type = 'r2r' #TODO
+        if data_type == 'r2r':
+            return 'Travel following the instruction, you can not ask for help. Instruction: ' \
+                + item['instruction']
+        elif data_type == 'soon':
+            return 'Find the described target, you can not ask for help. Target: ' \
+                + item['instruction']['instruction']
+        elif data_type == 'reverie':
+            return 'Go to the location to complete the given task, you can not ask for help. Task: ' \
+                + item['instruction']
+        elif data_type == 'eqa':
+            return 'Explore the scene and answer the question, you can not ask for help. Question: ' \
+                          + item['instruction']
+        elif data_type == 'cvdn':
+            return 'Find the described target, you can ask for help. Target: ' \
+                + item['instruction']
 
     def _language_variable(self, obs):
-        seq_lengths = [len(ob['instr_encoding']) for ob in obs]
-        
-        seq_tensor = np.zeros((len(obs), max(seq_lengths)), dtype=np.int64)
-        mask = np.zeros((len(obs), max(seq_lengths)), dtype=np.bool)
-        for i, ob in enumerate(obs):
-            seq_tensor[i, :seq_lengths[i]] = ob['instr_encoding']
-            mask[i, :seq_lengths[i]] = True
-
-        seq_tensor = torch.from_numpy(seq_tensor).long().cuda()
-        mask = torch.from_numpy(mask).cuda()
-        return {
-            'txt_ids': seq_tensor, 'txt_masks': mask
-        }
+        raw_instruction = [self.get_instruction(ob) for ob in obs]
+        return {'instruction': raw_instruction}
 
     def _panorama_feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
@@ -272,8 +279,12 @@ class GMapNavAgent(Seq2SeqAgent):
         
         # Language input: txt_ids, txt_masks
         language_inputs = self._language_variable(obs)
-        txt_embeds = self.vln_bert('language', language_inputs)
-    
+        instruction = language_inputs
+        history = []
+        hist_vis = []
+        for idx in range(len(instruction)):
+            history.append("")
+            hist_vis.append([])
         # Initialization the tracking state
         ended = np.array([False] * batch_size)
         just_ended = np.array([False] * batch_size)
@@ -287,9 +298,11 @@ class GMapNavAgent(Seq2SeqAgent):
           
             # graph representation
             pano_inputs = self._panorama_feature_variable(obs)
+            
             pano_embeds, pano_masks = self.vln_bert('panorama', pano_inputs)
-            avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
-                              torch.sum(pano_masks, 1, keepdim=True)
+
+            # avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
+            #                   torch.sum(pano_masks, 1, keepdim=True)
 
             # navigation policy
             nav_inputs = \
@@ -297,11 +310,9 @@ class GMapNavAgent(Seq2SeqAgent):
                     obs, start_pos, pano_embeds, pano_inputs['cand_vpids'], 
                     pano_inputs['view_lens'], pano_inputs['nav_types'],
                 )
-
-            nav_inputs.update({
-                'txt_embeds': txt_embeds,
-                'txt_masks': language_inputs['txt_masks'],
-            })
+            nav_inputs['instruction'] = instruction
+            nav_inputs['history'] = history
+            nav_inputs['hist_vis'] = hist_vis
             nav_outs = self.vln_bert('navigation', nav_inputs)
 
             nav_logits = nav_outs['local_logits']
@@ -323,7 +334,9 @@ class GMapNavAgent(Seq2SeqAgent):
                         imitation_learning=(self.feedback=='teacher'), t=t, traj=traj
                     )
                 # print(t, nav_logits, nav_targets)
-                ml_loss += self.criterion(nav_logits, nav_targets)
+                ml_loss = self.criterion(nav_logits, nav_targets) * train_ml / batch_size
+                # ml_loss += cnt_loss
+                # cnt_loss.backward()
                 # print(t, 'ml_loss', ml_loss.item(), self.criterion(nav_logits, nav_targets).item())
                                                  
             # Determinate the next navigation viewpoint
@@ -333,7 +346,7 @@ class GMapNavAgent(Seq2SeqAgent):
                 _, a_t = nav_logits.max(1)        # student forcing - argmax
                 a_t = a_t.detach() 
             elif self.feedback == 'sample':
-                c = torch.distributions.Categorical(nav_probs)
+                c = torch.distributions.Categorical(nav_probs.float())
                 self.logs['entropy'].append(c.entropy().sum().item())            # For log
                 entropys.append(c.entropy())                                     # For optimization
                 a_t = c.sample().detach() 
@@ -351,6 +364,13 @@ class GMapNavAgent(Seq2SeqAgent):
             else:
                 print(self.feedback)
                 sys.exit('Invalid feedback option')
+
+            # self.vln_bert('add_history', {'vis':nav_outs['vp_embeds'], 'action': a_t})
+            for idx in range(len(a_t)):
+                if a_t[idx] == -100:
+                    continue
+                history[idx] += '<hist>'
+                hist_vis[idx].append(nav_outs['vp_embeds'][idx][a_t[idx]])
 
             # Determine stop actions
             if self.feedback == 'teacher' or self.feedback == 'sample': # in training
@@ -370,21 +390,7 @@ class GMapNavAgent(Seq2SeqAgent):
 
             # Make action and get the new state
             self.make_equiv_action(cpu_a_t, obs, traj)
-            # for i in range(batch_size):
-            #     if (not ended[i]) and just_ended[i]:
-            #         stop_node, stop_score = None, {'stop': -float('inf')}
-            #         for k, v in gmaps[i].node_stop_scores.items():
-            #             if v['stop'] > stop_score['stop']:
-            #                 stop_score = v
-            #                 stop_node = k
-            #         if stop_node is not None and obs[i]['viewpoint'] != stop_node:
-            #             traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
-            #         if self.args.detailed_output:
-            #             for k, v in gmaps[i].node_stop_scores.items():
-            #                 traj[i]['details'][k] = {
-            #                     'stop_prob': float(v['stop']),
-            #                 }
-
+   
             # new observation and update graph
             obs = self.env._get_obs()
             self._update_scanvp_cands(obs)
@@ -396,7 +402,7 @@ class GMapNavAgent(Seq2SeqAgent):
                 break
 
         if train_ml is not None:
-            ml_loss = ml_loss * train_ml / batch_size
+            # ml_loss = ml_loss
             self.loss += ml_loss
             self.logs['IL_loss'].append(ml_loss.item())
 
