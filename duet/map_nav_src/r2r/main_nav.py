@@ -34,14 +34,14 @@ def build_dataset(args, rank=0, is_test=False):
     # we need to shuffle the data with different seed in each processes
     if args.aug is not None:
         aug_instr_data = construct_instrs(
-            args.anno_dir, args.dataset, [args.aug], 
+            args.anno_dir, args.dataset, [args.aug],
             tokenizer=args.tokenizer, max_instr_len=args.max_instr_len,
             is_test=is_test
         )
         aug_env = dataset_class(
-            feat_db, aug_instr_data, args.connectivity_dir, 
-            batch_size=args.batch_size, angle_feat_size=args.angle_feat_size, 
-            seed=args.seed+rank, sel_data_idxs=None, name='aug', 
+            feat_db, aug_instr_data, args.connectivity_dir,
+            batch_size=args.batch_size, angle_feat_size=args.angle_feat_size,
+            seed=args.seed+rank, sel_data_idxs=None, name='aug',
         )
     else:
         aug_env = None
@@ -59,7 +59,7 @@ def build_dataset(args, rank=0, is_test=False):
     )
 
     # val_env_names = ['val_train_seen']
-    val_env_names = ['val_train_seen', 'val_seen', 'val_unseen']
+    val_env_names = ['val_unseen'] # ['val_train_seen', 'val_seen', 'val_unseen']
     if args.dataset == 'r4r' and (not args.test):
         val_env_names[-1] == 'val_unseen_sampled'
     
@@ -135,15 +135,16 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
     if args.dataset == 'r4r':
         best_val = {'val_unseen_sampled': {"spl": 0., "sr": 0., "state":""}}
     
-    for idx in range(start_iter, start_iter+args.iters, args.log_every):
+    for idx in range(start_iter, start_iter+args.iters, args.log_every): # 0-->20,0000
         listner.logs = defaultdict(list)
-        interval = min(args.log_every, args.iters-idx)
-        iter = idx + interval
+        interval = min(args.log_every, args.iters-idx) # 1000 log interval
+        iter = idx + interval # 1000
 
         # Train for log_every interval
-        if aug_env is None:
+        if aug_env is None: # True
+
             listner.env = train_env
-            listner.train(interval, feedback=args.feedback)  # Train interval iters
+            listner.train(interval, feedback=args.feedback)  # Train interval iters, args.feedback='sample'
         else:
             jdx_length = len(range(interval // 2))
             for jdx in range(interval // 2):

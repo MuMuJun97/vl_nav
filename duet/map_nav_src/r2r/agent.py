@@ -335,7 +335,7 @@ class GMapNavAgent(Seq2SeqAgent):
 
         # Language input: txt_ids, txt_masks
         language_inputs = self._language_variable(obs)
-        txt_embeds = self.vln_bert('language', language_inputs)
+        txt_embeds = self.vln_bert('language', language_inputs) # [B, L, D=768]
     
         # Initialization the tracking state
         ended = np.array([False] * batch_size)
@@ -346,16 +346,16 @@ class GMapNavAgent(Seq2SeqAgent):
         entropys = []
         ml_loss = 0.     
 
-        for t in range(self.args.max_action_len):
+        for t in range(self.args.max_action_len): # max_action_len=15
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:
                     gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
 
             # graph representation
             pano_inputs = self._panorama_feature_variable(obs)
-            pano_embeds, pano_masks = self.vln_bert('panorama', pano_inputs)
+            pano_embeds, pano_masks = self.vln_bert('panorama', pano_inputs) # [B, 36, D=768], [B, 36,]
             avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
-                              torch.sum(pano_masks, 1, keepdim=True)
+                              torch.sum(pano_masks, 1, keepdim=True) # [B, D=768]
 
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:
@@ -388,7 +388,7 @@ class GMapNavAgent(Seq2SeqAgent):
                 nav_logits = nav_outs['global_logits']
                 nav_vpids = nav_inputs['gmap_vpids']
             else:
-                nav_logits = nav_outs['fused_logits']
+                nav_logits = nav_outs['fused_logits'] # output logits
                 nav_vpids = nav_inputs['gmap_vpids']
 
             nav_probs = torch.softmax(nav_logits, 1)

@@ -43,4 +43,4 @@ def construct_instrs(anno_dir, dataset, splits, tokenizer, max_instr_len=512, is
             del new_item['instructions']
             del new_item['instr_encodings']
             data.append(new_item)
-    return data
+    return data[:20]

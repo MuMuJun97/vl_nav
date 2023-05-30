@@ -6,18 +6,27 @@ import os
 from tools.train.distributed import world_info_from_env
 from pathlib import Path
 
-def random_seed(seed=42, rank=0):
-    torch.manual_seed(seed + rank)
-    np.random.seed(seed + rank)
-    random.seed(seed + rank)
+
+def random_seed(seed=0, rank=0):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
 
 def read_args():
     output_dir = Path(__file__).parent.parent.parent.resolve() / "vl_nav_output"
     parser = argparse.ArgumentParser()
 
+    ############ VLN-Tasks #############
+    parser.add_argument('--feat_dropout', type=float, default=0.3)
+
+
+
     ############# Tasks #############
     # R2R downstream tasks: multi-step inference.
-    parser.add_argument('--r2r_tok', type=str, default=False, help='multi-step tasks')
+    parser.add_argument('--r2r_tok', type=str, default=True, help='multi-step tasks')
     # R2R history image state:
     parser.add_argument('--multi_state', type=bool, default=True, help='multi history state')
     parser.add_argument('--single_step_loss', type=bool, default=False, help='compute loss in each step')

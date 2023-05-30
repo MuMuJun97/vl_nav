@@ -8,6 +8,9 @@
 
 **3.1 Matterport3DSimulator in Centos7**
 ```shell script
+# install packages
+pip install line-profiler==3.2.2
+
 # python 3.8 
 $ export PYTHONPATH=/mnt/petrelfs/zhaolin/vln/mp3d/Matterport3DSimulator-Centos7/build:$PYTHONPATH
 

@@ -1271,8 +1271,6 @@ class R2RDataset(torch_data.Dataset):
     def __getrawitem__(self, index):
         return self.alldata[index]
 
-
-
     @staticmethod
     def collate_batch(batch_list, _unused=False):
         data_dict = defaultdict(list)

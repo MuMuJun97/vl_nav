@@ -163,7 +163,7 @@ class Seq2SeqAgent(BaseAgent):
 
     def train(self, n_iters, feedback='teacher', **kwargs):
         ''' Train for a given number of iterations '''
-        self.feedback = feedback
+        self.feedback = feedback # 'sample'
 
         self.vln_bert.train()
         self.critic.train()
@@ -181,12 +181,12 @@ class Seq2SeqAgent(BaseAgent):
                 self.rollout(
                     train_ml=1., train_rl=False, **kwargs
                 )
-            elif self.args.train_alg == 'dagger': 
-                if self.args.ml_weight != 0:
+            elif self.args.train_alg == 'dagger': # train_alg='dagger'
+                if self.args.ml_weight != 0: # default: 0.2
                     self.feedback = 'teacher'
                     self.rollout(
                         train_ml=self.args.ml_weight, train_rl=False, **kwargs
-                    )
+                    ) # self.args.ml_weight=0.2
                 self.feedback = 'expl_sample' if self.args.expl_sample else 'sample'
                 self.rollout(train_ml=1, train_rl=False, **kwargs)
             else:

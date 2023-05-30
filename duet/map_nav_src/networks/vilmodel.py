@@ -439,7 +439,7 @@ class CrossmodalEncoder(nn.Module):
         self.x_layers = nn.ModuleList(
             [GraphLXRTXLayer(config) for _ in range(self.num_x_layers)]
         )
-
+    # txt_embeds[B, L, 768], img_embeds[B, N(valid views), 768], graph_sprels[B, 1, N, N] spatial relationship
     def forward(self, txt_embeds, txt_masks, img_embeds, img_masks, graph_sprels=None):
         extended_txt_masks = extend_neg_masks(txt_masks)
         extended_img_masks = extend_neg_masks(img_masks) # (N, 1(H), 1(L_q), L_v)
@@ -449,7 +449,7 @@ class CrossmodalEncoder(nn.Module):
                 img_embeds, extended_img_masks,
                 graph_sprels=graph_sprels
             )
-        return img_embeds
+        return img_embeds # -> img_embeds[B, N(valid views), 768]
 
 class ImageEmbeddings(nn.Module):
     def __init__(self, config):
@@ -679,15 +679,15 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         
         self.init_weights()
         
-        if config.fix_lang_embedding or config.fix_local_branch:
+        if config.fix_lang_embedding or config.fix_local_branch: # False
             for k, v in self.embeddings.named_parameters():
                 v.requires_grad = False
             for k, v in self.lang_encoder.named_parameters():
                 v.requires_grad = False
-        if config.fix_pano_embedding or config.fix_local_branch:
+        if config.fix_pano_embedding or config.fix_local_branch: # False
             for k, v in self.img_embeddings.named_parameters():
                 v.requires_grad = False
-        if config.fix_local_branch:
+        if config.fix_local_branch: # False
             for k, v in self.local_encoder.named_parameters():
                 v.requires_grad = False
             for k, v in self.local_sap_head.named_parameters():
@@ -754,7 +754,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
     ):
         batch_size = txt_embeds.size(0)
 
-        # global branch
+        # global branch [B, Nums, D=768]
         gmap_embeds = gmap_img_embeds + \
                       self.global_encoder.gmap_step_embeddings(gmap_step_ids) + \
                       self.global_encoder.gmap_pos_embeddings(gmap_pos_fts)
@@ -833,14 +833,14 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
     def forward(self, mode, batch, **kwargs):
         if mode == 'language':
             txt_embeds = self.forward_text(batch['txt_ids'], batch['txt_masks'])
-            return txt_embeds
+            return txt_embeds # [B, L, D=768]
 
         elif mode == 'panorama':
             pano_embeds, pano_masks = self.forward_panorama_per_step(
                 batch['view_img_fts'], batch['obj_img_fts'], batch['loc_fts'],
                 batch['nav_types'], batch['view_lens'], batch['obj_lens']
             )
-            return pano_embeds, pano_masks
+            return pano_embeds, pano_masks # [B, 36, D=768], [B, 36,]
 
         elif mode == 'navigation':
              return self.forward_navigation_per_step(

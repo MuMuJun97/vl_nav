@@ -10,7 +10,8 @@ from pathlib import Path
 import cv2
 import ast
 
-def load_r2r_data(anno_file):
+
+def load_r2r_data(anno_file, max_instr_len=200):
     # assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)
@@ -22,8 +23,9 @@ def load_r2r_data(anno_file):
             new_item = dict(item)
             new_item['raw_idx'] = i
             new_item['sample_idx'] = sample_index
-            new_item['instr_id'] = '{}_{}'.format(i, j)
+            new_item['instr_id'] = '{}_{}'.format(item['path_id'], j)
             new_item['instruction'] = instr
+            new_item['instr_encoding'] = item['instr_encodings'][j][:max_instr_len]
             del new_item['instructions']
             del new_item['instr_encodings']
             new_item['data_type'] = 'r2r'
