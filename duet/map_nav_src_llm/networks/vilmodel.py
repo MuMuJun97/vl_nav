@@ -95,13 +95,15 @@ class LangModel(nn.Module):
     def __init__(self):
         super().__init__()
 
-        if 'lustre' in __file__:
+        if 'lustre' in __file__ or 'petrelfs' in __file__:
+            # in S2 server
             path = '/mnt/lustre/share_data/huangshijia/alpaca'
             self.tokenizer = AutoTokenizer.from_pretrained(
                 path, local_files_only=False
             )
             is_s2_server = True
         else:
+            # in local PC, debug mode
             tokenizer_path = '/home/zlin/vln/llm/alpaca_model/model_config.pkl'
             path = Path(tokenizer_path).parent.resolve().__str__()
             self.tokenizer = AutoTokenizer.from_pretrained(

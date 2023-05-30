@@ -99,8 +99,8 @@ def dist_models(args, vln_model: BertVLNModel, language_model=None, logger=None)
 
         if args.distributed:
             from torch.nn.parallel import DistributedDataParallel as DDP
-            vln_model.vln_bert = DDP(vln_model.vln_bert, device_ids=[device_id], find_unused_parameters=False)
-            vln_model.critic = DDP(vln_model.critic, device_ids=[device_id], find_unused_parameters=False)
+            vln_model.vln_bert = DDP(vln_model.vln_bert, device_ids=[device_id], find_unused_parameters=True)
+            vln_model.critic = DDP(vln_model.critic, device_ids=[device_id], find_unused_parameters=True)
 
             # args.batch_size: BATCH_SIZE_PER_GPU
             logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
