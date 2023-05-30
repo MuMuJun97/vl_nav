@@ -9,8 +9,8 @@ from pathlib import Path
 
 def random_seed(seed=0, rank=0):
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    # torch.cuda.manual_seed(seed)
+    # torch.cuda.manual_seed_all(seed)
     random.seed(seed)
     np.random.seed(seed)
 

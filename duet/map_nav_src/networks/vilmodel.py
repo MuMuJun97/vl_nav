@@ -451,6 +451,7 @@ class CrossmodalEncoder(nn.Module):
             )
         return img_embeds # -> img_embeds[B, N(valid views), 768]
 
+
 class ImageEmbeddings(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -523,7 +524,8 @@ class ImageEmbeddings(nn.Module):
         split_traj_embeds = torch.split(traj_embeds, traj_step_lens, 0)
         split_traj_vp_lens = torch.split(traj_vp_lens, traj_step_lens, 0)
         return split_traj_embeds, split_traj_vp_lens
-        
+
+
 class LocalVPEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -557,6 +559,7 @@ class LocalVPEncoder(nn.Module):
         )
         vp_embeds = self.encoder(txt_embeds, txt_masks, vp_embeds, vp_masks)
         return vp_embeds
+
 
 class GlobalMapEncoder(nn.Module):
     def __init__(self, config):

@@ -10,6 +10,7 @@ def get_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(cfg_name)
     return tokenizer
 
+
 def get_vlnbert_models_ddp(args, config=None):
     
     from transformers import PretrainedConfig
@@ -17,7 +18,6 @@ def get_vlnbert_models_ddp(args, config=None):
 
     from transformers.utils import logging
     logging.set_verbosity_error()
-
 
     model_name_or_path = None # args.bert_ckpt_file
     new_ckpt_weights = {}
@@ -41,15 +41,15 @@ def get_vlnbert_models_ddp(args, config=None):
     #     vis_config.type_vocab_size = 2
     
     vis_config.max_action_steps = 100
-    vis_config.image_feat_size = 768 # args.image_feat_size
-    vis_config.angle_feat_size = 4 # args.angle_feat_size
-    vis_config.obj_feat_size = 0 # args.obj_feat_size
+    vis_config.image_feat_size = args.image_feat_size
+    vis_config.angle_feat_size = args.angle_feat_size
+    vis_config.obj_feat_size = args.obj_feat_size
     vis_config.obj_loc_size = 3
-    vis_config.num_l_layers = 9 # args.num_l_layers
-    vis_config.num_pano_layers = 2 # args.num_pano_layers
-    vis_config.num_x_layers = 4 # args.num_x_layers
-    vis_config.graph_sprels = True # args.graph_sprels
-    vis_config.glocal_fuse = True # args.fusion == 'dynamic'
+    vis_config.num_l_layers = args.num_l_layers
+    vis_config.num_pano_layers = args.num_pano_layers
+    vis_config.num_x_layers = args.num_x_layers
+    vis_config.graph_sprels = args.graph_sprels
+    vis_config.glocal_fuse = args.fusion == 'dynamic'
 
     vis_config.fix_lang_embedding = False # args.fix_lang_embedding
     vis_config.fix_pano_embedding = False # args.fix_pano_embedding
@@ -73,7 +73,7 @@ def get_vlnbert_models(args, config=None):
     from transformers import PretrainedConfig
     from networks.vilmodel import GlocalTextPathNavCMT
 
-    model_name_or_path = args.bert_ckpt_file
+    model_name_or_path = args.bert_ckpt_file # None
     new_ckpt_weights = {}
     if model_name_or_path is not None:
         ckpt_weights = torch.load(model_name_or_path)

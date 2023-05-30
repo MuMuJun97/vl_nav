@@ -373,7 +373,6 @@ class VLNModel(nn.Module):
 class BertVLNModel(object):
     def __init__(self, args, logger=None):
         super().__init__()
-        args.dropout = 0.5
         self.args = args
         self.vln_bert = VLNBert(self.args, use_ddp=True)
         self.critic = Critic(self.args)

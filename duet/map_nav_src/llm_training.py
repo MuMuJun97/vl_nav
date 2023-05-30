@@ -57,7 +57,7 @@ def init_config(args):
     return logger, global_cfg
 
 
-def dist_models(args, vln_model, language_model=None, logger=None):
+def dist_models(args, vln_model: BertVLNModel, language_model=None, logger=None):
     logger.info("*************** init vln_model & language_model *************** ")
     # args.rank: global rank.
     total_gpus = torch.cuda.device_count()
@@ -89,8 +89,8 @@ def dist_models(args, vln_model, language_model=None, logger=None):
     else:
         vln_model.vln_bert.to(device_id)
         vln_model.critic.to(device_id)
-        vln_bert_optimizer = torch.optim.AdamW(vln_model.vln_bert.parameters(), lr=1e-05)
-        critic_optimizer = torch.optim.AdamW(vln_model.critic.parameters(), lr=1e-05)
+        vln_bert_optimizer = torch.optim.AdamW(vln_model.vln_bert.parameters(), lr=args.lr)
+        critic_optimizer = torch.optim.AdamW(vln_model.critic.parameters(), lr=args.lr)
         vln_optimizer = (vln_bert_optimizer, critic_optimizer)
         language_optimizer = None
         lr_scheduler = None
@@ -118,7 +118,7 @@ def main():
         args.val_split = 'val_unseen'
 
     logger, global_cfg = init_config(args)
-    random_seed(seed=args.seed + args.rank)
+    random_seed(seed=args.seed)
 
     ############# Language Model #############
     if args.enable_language_model:
@@ -150,17 +150,33 @@ def main():
 
     else:
         args.fusion = 'dynamic'
+        args.seed = 0
         args.dataset = 'r2r'
         args.act_visited_nodes = False
         args.enc_full_graph = True
+        args.graph_sprels = True
+
         args.image_feat_size = 768
+        args.angle_feat_size = 4
+        args.obj_feat_size = 0
+
+        args.num_l_layers = 9
+        args.num_pano_layers = 2
+        args.num_x_layers = 4
+
         args.ignoreid = -100
+        args.feat_dropout = 0.4
+        args.dropout = 0.5
+
+        args.lr = 1e-5
+
         args.expert_policy = 'spl'
         vln_model = BertVLNModel(
             args, logger=logger
         )
         language_model = None
         tokenizer = None
+    random_seed(args.seed + args.rank)
 
     ############# Dataset #############
     feat_db = ImageFeaturesDB(args.img_ft_file, args.image_feat_size)
@@ -202,7 +218,6 @@ def main():
         )
 
     ############# Init DDP: VLN+Language Model #############
-    random_seed(args.seed + args.rank)
     print(f"Start running training on rank {args.rank}.")
     vln_model, vln_optimizer, \
         language_model, language_optimizer, \

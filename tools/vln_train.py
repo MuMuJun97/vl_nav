@@ -17,6 +17,20 @@ from duet.map_nav_src.r2r.eval_utils import cal_dtw
 from duet.map_nav_src.utils.distributed import all_gather
 
 
+class Metrics(object):
+    def __init__(self):
+        self.num = 0
+        self.total = 0
+
+    def accumulate(self, x):
+        self.num += 1
+        self.total += x
+
+    @property
+    def average(self):
+        return self.total / self.num
+
+
 class NavigationAgent(object):
     def __init__(self, args, shortest_distances, shortest_paths):
         self.args = args
@@ -305,6 +319,7 @@ def vln_train_one_epoch(
     )
     dataloader_it = iter(r2r_dataloader)
 
+    loss_metric = Metrics()
     for num_steps in pbar:
         global_step = num_steps + epoch * num_batches_per_epoch
 
@@ -334,6 +349,7 @@ def vln_train_one_epoch(
         )
         if train_ml is not None:
             iter_loss += ml_loss
+            loss_metric.accumulate(ml_loss.item())
 
         #################### dagger training ####################
         feedback, train_ml, train_rl = 'sample', 1, False
@@ -352,6 +368,7 @@ def vln_train_one_epoch(
         )
         if train_ml is not None:
             iter_loss += sample_ml_loss
+            loss_metric.accumulate(sample_ml_loss.item())
 
         iter_loss.backward()
 
@@ -361,6 +378,12 @@ def vln_train_one_epoch(
             torch.nn.utils.clip_grad_norm_(vln_model.vln_bert.parameters(), 40.)
             vln_bert_optimizer.step()
             critic_optimizer.step()
+
+        if args.rank == 0:
+            pbar.update()
+            pbar.set_postfix(dict(
+                loss_metric=loss_metric.average,
+            ))
 
 
 def rollout(
@@ -508,12 +531,12 @@ def rollout(
                 # @note: comment this -> not add extra stop nodes.
                 # if not comment, sample='gt', sr=0.0, oracle_sr=100.00
                 # =====================================================
-                # for k, v in gmaps[i].node_stop_scores.items():
-                #     if v['stop'] > stop_score['stop']:
-                #         stop_score = v
-                #         stop_node = k
-                # if stop_node is not None and obs[i]['viewpoint'] != stop_node:
-                #     traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
+                for k, v in gmaps[i].node_stop_scores.items():
+                    if v['stop'] > stop_score['stop']:
+                        stop_score = v
+                        stop_node = k
+                if stop_node is not None and obs[i]['viewpoint'] != stop_node:
+                    traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
                 # if args.detailed_output:
                 #     for k, v in gmaps[i].node_stop_scores.items():
                 #         traj[i]['details'][k] = {
@@ -543,6 +566,7 @@ def rollout(
 
     if train_ml is not None:
         ml_loss = ml_loss * train_ml / batch_size
+
 
     return ml_loss, traj
 

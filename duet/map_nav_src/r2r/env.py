@@ -89,7 +89,7 @@ class R2RNavBatch(object):
         self.scans = set([x['scan'] for x in self.data])
         self.connectivity_dir = connectivity_dir
         self.batch_size = batch_size
-        self.angle_feat_size = angle_feat_size
+        self.angle_feat_size = angle_feat_size # 4
         self.name = name
 
         self.gt_trajs = self._get_gt_trajs(self.data) # for evaluation
