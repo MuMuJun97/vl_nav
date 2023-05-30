@@ -14,7 +14,11 @@ def get_vlnbert_models_ddp(args, config=None):
     
     from transformers import PretrainedConfig
     from networks.vilmodel import GlocalTextPathNavCMT
-    
+
+    from transformers.utils import logging
+    logging.set_verbosity_error()
+
+
     model_name_or_path = None # args.bert_ckpt_file
     new_ckpt_weights = {}
     if model_name_or_path is not None:
@@ -59,7 +63,8 @@ def get_vlnbert_models_ddp(args, config=None):
     visual_model = GlocalTextPathNavCMT.from_pretrained(
         pretrained_model_name_or_path=None, 
         config=vis_config, 
-        state_dict=new_ckpt_weights)
+        state_dict=new_ckpt_weights
+    )
         
     return visual_model
 

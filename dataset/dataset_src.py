@@ -219,7 +219,7 @@ class SrcDataset(torch_data.Dataset):
         Load connectivity graph for each scan, useful for reasoning about shortest paths
         :return: None
         """
-        print('Loading navigation graphs for %d scans' % len(self.scans))
+        # print('Loading navigation graphs for %d scans' % len(self.scans))
         self.graphs = load_nav_graphs(self.connectivity_dir, self.scans)
         self.shortest_paths = {}
         for scan, G in self.graphs.items():  # compute all shortest paths
