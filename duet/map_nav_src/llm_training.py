@@ -89,16 +89,16 @@ def dist_models(args, vln_model, language_model=None, logger=None):
     else:
         vln_model.vln_bert.to(device_id)
         vln_model.critic.to(device_id)
-        vln_bert_optimizer = torch.optim.AdamW(get_grouped_params(vln_model.vln_bert, args), lr=args.learning_rate)
-        critic_optimizer = torch.optim.AdamW(get_grouped_params(vln_model.critic, args), lr=args.learning_rate)
+        vln_bert_optimizer = torch.optim.AdamW(vln_model.vln_bert.parameters(), lr=1e-05)
+        critic_optimizer = torch.optim.AdamW(vln_model.critic.parameters(), lr=1e-05)
         vln_optimizer = (vln_bert_optimizer, critic_optimizer)
         language_optimizer = None
         lr_scheduler = None
 
         if args.distributed:
             from torch.nn.parallel import DistributedDataParallel as DDP
-            vln_model.vln_bert = DDP(vln_model.vln_bert, device_ids=[device_id])
-            vln_model.critic = DDP(vln_model.critic, device_ids=[device_id])
+            vln_model.vln_bert = DDP(vln_model.vln_bert, device_ids=[device_id], find_unused_parameters=True)
+            vln_model.critic = DDP(vln_model.critic, device_ids=[device_id], find_unused_parameters=True)
 
             # args.batch_size: BATCH_SIZE_PER_GPU
             logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))

@@ -371,7 +371,7 @@ def rollout(
         train_ml,
         train_rl,
         nav_agent,
-        vln_model
+        vln_model: BertVLNModel,
 ):
     obs = batch_dict['observations']
     envs = batch_dict['env']
