@@ -1,7 +1,8 @@
-TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nnodes=1 --nproc_per_node=2 r2r/main_nav.py \
+NUM_GPU=8
+torchrun --nnodes=1 --nproc_per_node=$NUM_GPU r2r/main_nav.py \
 --dataset r2r \
---output_dir ../../../vl_nav_output_baseline \
---world_size 2 \
+--output_dir ../../../vl_nav_output_baseline7 \
+--world_size $NUM_GPU \
 --seed 0 \
 --tokenizer bert \
 --enc_full_graph --graph_sprels \
@@ -11,10 +12,10 @@ TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nnodes=1 --nproc_per_node=2 r2r/main_n
 --num_pano_layers 2 \
 --max_action_len 15 \
 --max_instr_len 200 \
---batch_size 1 \
---lr 1e-5 \
+--batch_size 4 \
+--lr 3e-5 \
 --iters 20000 \
---log_every 2000 \
+--log_every 1000 \
 --optim adamW \
 --expert_policy spl \
 --train_alg dagger \

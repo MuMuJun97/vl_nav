@@ -23,7 +23,7 @@ from .eval_utils import cal_dtw
 from networks.graph_utils import calculate_vp_rel_pos_fts, get_angle_fts
 from networks.model import VLNBert, Critic
 from networks.ops import pad_tensors_wgrad
-
+from contextlib import nullcontext
 
 class GMapNavAgent(Seq2SeqAgent):
     
@@ -53,7 +53,7 @@ class GMapNavAgent(Seq2SeqAgent):
 
     def _language_variable(self, obs):
         raw_instruction = [self.get_instruction(ob) for ob in obs]
-        return {'instruction': raw_instruction}
+        return raw_instruction
 
     def _panorama_feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
@@ -259,7 +259,7 @@ class GMapNavAgent(Seq2SeqAgent):
                 self.scanvp_cands[scanvp][cand['viewpointId']] = cand['pointId']
 
     # @profile
-    def rollout(self, train_ml=None, train_rl=False, reset=True):
+    def rollout(self, train_ml=None, train_rl=False, reset=True, do_backward=False):
         if reset:  # Reset env
             obs = self.env.reset()
         else:
@@ -292,118 +292,133 @@ class GMapNavAgent(Seq2SeqAgent):
         # Init the logs
         masks = []
         entropys = []
-        ml_loss = 0.     
-
+        cnt_loss = 0.
+        ml_loss = 0.  
+        flag = False
         for t in range(self.args.max_action_len):
-          
             # graph representation
-            pano_inputs = self._panorama_feature_variable(obs)
-            
-            pano_embeds, pano_masks = self.vln_bert('panorama', pano_inputs)
+            if ended.all() or t == self.args.max_action_len-1:
+                flag = True
+                context = nullcontext
+            else:
+                context = self.vln_bert.no_sync
 
-            # avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
-            #                   torch.sum(pano_masks, 1, keepdim=True)
+            with context():
+                pano_inputs = self._panorama_feature_variable(obs)
+                
+                pano_embeds, pano_masks = self.vln_bert('panorama', pano_inputs)
 
-            # navigation policy
-            nav_inputs = \
-                self._nav_vp_variable(
-                    obs, start_pos, pano_embeds, pano_inputs['cand_vpids'], 
-                    pano_inputs['view_lens'], pano_inputs['nav_types'],
-                )
-            nav_inputs['instruction'] = instruction
-            nav_inputs['history'] = history
-            nav_inputs['hist_vis'] = hist_vis
-            nav_outs = self.vln_bert('navigation', nav_inputs)
+                # avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
+                #                   torch.sum(pano_masks, 1, keepdim=True)
 
-            nav_logits = nav_outs['local_logits']
-            nav_vpids = nav_inputs['vp_cand_vpids']
-            nav_probs = torch.softmax(nav_logits, 1)
-                                        
-            if train_ml is not None:
-                # Supervised training
-                if self.args.dataset == 'r2r':
-                    nav_targets = self._teacher_action_r4r(
-                        obs, nav_vpids, ended, 
-                        visited_masks=None,
-                        imitation_learning=(self.feedback=='teacher'), t=t, traj=traj
+                # navigation policy
+                nav_inputs = \
+                    self._nav_vp_variable(
+                        obs, start_pos, pano_embeds, pano_inputs['cand_vpids'], 
+                        pano_inputs['view_lens'], pano_inputs['nav_types'],
                     )
-                elif self.args.dataset == 'r4r':
-                    nav_targets = self._teacher_action_r4r(
-                        obs, nav_vpids, ended, 
-                        visited_masks=None,
-                        imitation_learning=(self.feedback=='teacher'), t=t, traj=traj
-                    )
-                # print(t, nav_logits, nav_targets)
-                ml_loss = self.criterion(nav_logits, nav_targets) * train_ml / batch_size
-                # ml_loss += cnt_loss
-                # cnt_loss.backward()
-                # print(t, 'ml_loss', ml_loss.item(), self.criterion(nav_logits, nav_targets).item())
-                                                 
-            # Determinate the next navigation viewpoint
-            if self.feedback == 'teacher':
-                a_t = nav_targets                 # teacher forcing
-            elif self.feedback == 'argmax':
-                _, a_t = nav_logits.max(1)        # student forcing - argmax
-                a_t = a_t.detach() 
-            elif self.feedback == 'sample':
-                c = torch.distributions.Categorical(nav_probs.float())
-                self.logs['entropy'].append(c.entropy().sum().item())            # For log
-                entropys.append(c.entropy())                                     # For optimization
-                a_t = c.sample().detach() 
-            elif self.feedback == 'expl_sample':
-                _, a_t = nav_probs.max(1)
-                rand_explores = np.random.rand(batch_size, ) > self.args.expl_max_ratio  # hyper-param
-                if self.args.fusion == 'local':
-                    cpu_nav_masks = nav_inputs['vp_nav_masks'].data.cpu().numpy()
+                nav_inputs['instruction'] = instruction
+                nav_inputs['history'] = history
+                nav_inputs['hist_vis'] = hist_vis
+                nav_outs = self.vln_bert('navigation', nav_inputs)
+
+                nav_logits = nav_outs['local_logits']
+                nav_vpids = nav_inputs['vp_cand_vpids']
+                nav_probs = torch.softmax(nav_logits, 1)
+                                            
+                if train_ml is not None:
+                    # Supervised training
+                    if self.args.dataset == 'r2r':
+                        nav_targets = self._teacher_action_r4r(
+                            obs, nav_vpids, ended, 
+                            visited_masks=None,
+                            imitation_learning=(self.feedback=='teacher'), t=t, traj=traj
+                        )
+                    elif self.args.dataset == 'r4r':
+                        nav_targets = self._teacher_action_r4r(
+                            obs, nav_vpids, ended, 
+                            visited_masks=None,
+                            imitation_learning=(self.feedback=='teacher'), t=t, traj=traj
+                        )
+                    # print(t, nav_logits, nav_targets)
+                    cnt_loss += self.criterion(nav_logits, nav_targets) * train_ml / batch_size
+                    ml_loss += cnt_loss.detach()
+                    cnt_loss.backward()
+                    cnt_loss = 0.
+                    # if (t+1) % 5 == 0 or t == self.args.max_action_len-1:
+                        # cnt_loss.backward()
+                        # ml_loss += cnt_loss.detach()
+                        # cnt_loss = 0.
+                    # cnt_loss.backward()
+                    # print(t, 'ml_loss', ml_loss.item(), self.criterion(nav_logits, nav_targets).item())
+                                                    
+                # Determinate the next navigation viewpoint
+                if self.feedback == 'teacher':
+                    a_t = nav_targets                 # teacher forcing
+                elif self.feedback == 'argmax':
+                    _, a_t = nav_logits.max(1)        # student forcing - argmax
+                    a_t = a_t.detach() 
+                elif self.feedback == 'sample':
+                    c = torch.distributions.Categorical(nav_probs.float())
+                    self.logs['entropy'].append(c.entropy().sum().item())            # For log
+                    entropys.append(c.entropy())                                     # For optimization
+                    a_t = c.sample().detach() 
+                elif self.feedback == 'expl_sample':
+                    _, a_t = nav_probs.max(1)
+                    rand_explores = np.random.rand(batch_size, ) > self.args.expl_max_ratio  # hyper-param
+                    if self.args.fusion == 'local':
+                        cpu_nav_masks = nav_inputs['vp_nav_masks'].data.cpu().numpy()
+                    else:
+                        cpu_nav_masks = (nav_inputs['gmap_masks'] * nav_inputs['gmap_visited_masks'].logical_not()).data.cpu().numpy()
+                    for i in range(batch_size):
+                        if rand_explores[i]:
+                            cand_a_t = np.arange(len(cpu_nav_masks[i]))[cpu_nav_masks[i]]
+                            a_t[i] = np.random.choice(cand_a_t)
                 else:
-                    cpu_nav_masks = (nav_inputs['gmap_masks'] * nav_inputs['gmap_visited_masks'].logical_not()).data.cpu().numpy()
+                    print(self.feedback)
+                    sys.exit('Invalid feedback option')
+
+                # self.vln_bert('add_history', {'vis':nav_outs['vp_embeds'], 'action': a_t})
+                for idx in range(len(a_t)):
+                    if a_t[idx] == -100:
+                        continue
+                    history[idx] += '<hist>'
+                    hist_vis[idx].append(nav_outs['vp_embeds'][idx][a_t[idx]])
+
+                # Determine stop actions
+                if self.feedback == 'teacher' or self.feedback == 'sample': # in training
+                    # a_t_stop = [ob['viewpoint'] in ob['gt_end_vps'] for ob in obs]
+                    a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
+                else:
+                    a_t_stop = a_t == 0
+
+                # Prepare environment action
+                cpu_a_t = []  
                 for i in range(batch_size):
-                    if rand_explores[i]:
-                        cand_a_t = np.arange(len(cpu_nav_masks[i]))[cpu_nav_masks[i]]
-                        a_t[i] = np.random.choice(cand_a_t)
-            else:
-                print(self.feedback)
-                sys.exit('Invalid feedback option')
+                    if a_t_stop[i] or ended[i] or (t == self.args.max_action_len - 1):
+                        cpu_a_t.append(None)
+                        just_ended[i] = True
+                    else:
+                        cpu_a_t.append(nav_vpids[i][a_t[i]])   
 
-            # self.vln_bert('add_history', {'vis':nav_outs['vp_embeds'], 'action': a_t})
-            for idx in range(len(a_t)):
-                if a_t[idx] == -100:
-                    continue
-                history[idx] += '<hist>'
-                hist_vis[idx].append(nav_outs['vp_embeds'][idx][a_t[idx]])
+                # Make action and get the new state
+                self.make_equiv_action(cpu_a_t, obs, traj)
 
-            # Determine stop actions
-            if self.feedback == 'teacher' or self.feedback == 'sample': # in training
-                # a_t_stop = [ob['viewpoint'] in ob['gt_end_vps'] for ob in obs]
-                a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
-            else:
-                a_t_stop = a_t == 0
+                # new observation and update graph
+                obs = self.env._get_obs()
+                self._update_scanvp_cands(obs)
 
-            # Prepare environment action
-            cpu_a_t = []  
-            for i in range(batch_size):
-                if a_t_stop[i] or ended[i] or (t == self.args.max_action_len - 1):
-                    cpu_a_t.append(None)
-                    just_ended[i] = True
-                else:
-                    cpu_a_t.append(nav_vpids[i][a_t[i]])   
+                ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
 
-            # Make action and get the new state
-            self.make_equiv_action(cpu_a_t, obs, traj)
-   
-            # new observation and update graph
-            obs = self.env._get_obs()
-            self._update_scanvp_cands(obs)
-
-            ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
-
-            # Early exit if all ended
-            if ended.all():
-                break
+                # Early exit if all ended
+                # if ended.all():
+                #     break
+                if flag:
+                    break
 
         if train_ml is not None:
             # ml_loss = ml_loss
-            self.loss += ml_loss
+            # self.loss += cnt_loss
             self.logs['IL_loss'].append(ml_loss.item())
 
         return traj

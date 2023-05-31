@@ -49,8 +49,9 @@ class LangModel(nn.Module):
     def __init__(self):
         super().__init__()
         path = '/mnt/lustre/huangshijia.p/LLAMA_7B'
+        # path = 'bigscience/bloom-560m'
         self.tokenizer = AutoTokenizer.from_pretrained(
-            path, local_files_only=True
+            path
         )
         self.cand_token = ['<cand>']
         self.his_token = ['<hist>']
@@ -62,12 +63,14 @@ class LangModel(nn.Module):
         self.cand_token_id = self.tokenizer.encode("<cand>", add_special_tokens=False)
         self.hist_token_id = self.tokenizer.encode("<hist>", add_special_tokens=False)
         self.lang_model = AutoModelForCausalLM.from_pretrained(
-            path, local_files_only=True
+            path
         ).bfloat16()
         self.lang_model.resize_token_embeddings(len(self.tokenizer))
+        dim = 4096
+        # dim = 1024
         self.mapper = nn.Sequential(
-            nn.Linear(768, 4096),
-            nn.LayerNorm(4096)
+            nn.Linear(768, dim),
+            nn.LayerNorm(dim)
         )
 
     def tokenize(self, text):
@@ -88,12 +91,13 @@ class LangModel(nn.Module):
         cand_locations = (input_ids >= self.cand_token_id[0]) & (input_ids <= self.cand_token_id[-1])
 
         inputs_embeds = self.lang_model.model.embed_tokens(input_ids)
+        # inputs_embeds = self.lang_model.transformer.word_embeddings(input_ids)
+
         if cand_locations.sum() != 0:
             inputs_embeds[cand_locations] += self.mapper(kwargs['cand_vis'])
         if hist_locations.sum() != 0:
             inputs_embeds[hist_locations] += self.mapper(kwargs['hist_vis'])
             
-
         if 'cand_vis' in kwargs:
             kwargs.pop('cand_vis')
         if 'hist_vis' in kwargs:
@@ -106,7 +110,10 @@ class LangModel(nn.Module):
         labels = None
         if 'labels' in kwargs:
             labels = kwargs.pop('labels')
+
         outputs = self.lang_model.model(*input, **kwargs)
+        # outputs = self.lang_model.transformer(*input, **kwargs)
+
         hidden_states = outputs[0]
         logits = self.lang_model.lm_head(hidden_states)
 
@@ -230,7 +237,8 @@ class ClsPrediction(nn.Module):
 class GlocalTextPathNavCMT(BertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
-
+        dim = 4096
+        # dim = 1024
         self.img_embeddings = ImageEmbeddings(config)
         self.lang_model = LangModel()
         self.vp_pos_embeddings = nn.Sequential(
@@ -238,9 +246,9 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             BertLayerNorm(config.hidden_size, eps=1e-12)
         )
 
-        self.local_sap_head = ClsPrediction(4096).bfloat16()
+        self.local_sap_head = ClsPrediction(dim).bfloat16()
         if self.config.obj_feat_size > 0:
-            self.og_head = ClsPrediction(4096).bfloat16()
+            self.og_head = ClsPrediction(dim).bfloat16()
         
         self.instruction = None
         self.history = None
