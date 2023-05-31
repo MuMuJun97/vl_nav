@@ -19,7 +19,7 @@ from dataset.process_multi_data import (
     load_fr2r_data, load_reverie_data,
     generate_data_indexs,
     generate_graphs, load_nav_graphs,
-    load_eqa_data, load_cvdn_data
+    load_eqa_data, load_cvdn_data, load_cvdn_raw
 )
 from dataset.r2r_instr_src import InstructionPro
 ERROR_MARGIN = 3.0
@@ -170,6 +170,18 @@ class SrcDataset(torch_data.Dataset):
                 _anno_file = _root_dir / config.R2R.DIR / config.R2R.SPLIT[self.split]
                 self.data['r2r'] = load_r2r_data(anno_file=_anno_file)
                 msg += '\n- Dataset: load {} R2R samples'.format(len(self.data['r2r']))
+            elif source == 'SOON':
+                _anno_file = _root_dir / config.SOON.DIR / config.SOON.SPLIT[self.split]
+                self.data['soon'] = load_soon_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} SOON samples'.format(len(self.data['soon']))
+            elif source == 'REVERIE':
+                _anno_file = _root_dir / config.REVERIE.DIR / config.REVERIE.SPLIT[self.split]
+                self.data['reverie'] = load_reverie_data(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} REVERIE samples'.format(len(self.data['reverie']))
+            elif source == 'CVDN':
+                _anno_file = _root_dir / config.CVDN.DIR / config.CVDN.SPLIT[self.split]
+                self.data['cvdn'] = load_cvdn_raw(anno_file=_anno_file)
+                msg += '\n- Dataset: load {} CVDN samples'.format(len(self.data['cvdn']))
             else:
                 NotImplementedError
 
@@ -360,10 +372,10 @@ class SrcDataset(torch_data.Dataset):
         env.newEpisodes(scanIds, viewpointIds, headings)
         observations = self.get_obs(items=[item], env=env)[0]
 
-        instr = InstructionPro(
-            instr=item['instruction'],
-            type=data_type,
-        )
+        # instr = InstructionPro(
+        #     instr=item['instruction'],
+        #     type=data_type,
+        # )
 
         data_dict = {
             'sample_idx': index,
@@ -371,7 +383,8 @@ class SrcDataset(torch_data.Dataset):
             'observations': observations,
             'env': env,
             'item': item,
-            'instr': instr,
+            # 'instr': instr,
+            'data_type': data_type,
         }
 
         return data_dict

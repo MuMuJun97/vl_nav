@@ -92,29 +92,38 @@ def llama_model_in_debug_model(lang_encoder_path):
 
 
 class LangModel(nn.Module):
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
 
-        if 'lustre' in __file__ or 'petrelfs' in __file__:
-            # in S2 server
-            path = '/mnt/lustre/share_data/huangshijia/alpaca'
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                path, local_files_only=False
-            )
-            is_s2_server = True
+        # LLaMa-7B, 'bigscience/bloom-560m',
+        self.tokenizer_path = config.tokenizer_path
+        if 'bloom' in self.tokenizer_path:
+            self.is_bloom = True
         else:
-            # in local PC, debug mode
-            tokenizer_path = '/home/zlin/vln/llm/alpaca_model/model_config.pkl'
-            path = Path(tokenizer_path).parent.resolve().__str__()
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                path, local_files_only=False
-            )
-            is_s2_server = False
+            self.is_bloom = False
 
-        # path = '/mnt/lustre/huangshijia.p/LLAMA_7B'
-        # self.tokenizer = AutoTokenizer.from_pretrained(
-        #     path, local_files_only=True
-        # )
+        local_files_only = False
+
+        if config.precision == 'fp16':
+            self.model_type = torch.float16
+        elif 'bf16' in config.precision or 'bfloat16' in config.precision:
+            self.model_type = torch.bfloat16
+        else:
+            self.model_type = torch.float32
+
+        if 'model_config.pkl' in self.tokenizer_path:
+            # use local llama-7b
+            _tokenizer_path = Path(self.tokenizer_path).parent.resolve().__str__()
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                _tokenizer_path, local_files_only=local_files_only
+            )
+            is_local_llama = True
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.tokenizer_path, local_files_only=local_files_only
+            )
+            is_local_llama = False
+
         self.cand_token = ['<cand>']
         self.his_token = ['<hist>']
         self.exec_token = ['<exec{}>'.format(i) for i in range(100)]
@@ -127,22 +136,22 @@ class LangModel(nn.Module):
         self.cand_token_id = self.tokenizer.encode("<cand>", add_special_tokens=False)
         self.hist_token_id = self.tokenizer.encode("<hist>", add_special_tokens=False)
 
-        if is_s2_server:
-            self.lang_model = AutoModelForCausalLM.from_pretrained(
-                path, local_files_only=False
-            ).bfloat16()
+        if is_local_llama:
+            self.lang_model = llama_model_in_debug_model(self.tokenizer_path)
+            self.lang_model = self.lang_model.to(self.model_type)
         else:
-            self.lang_model = llama_model_in_debug_model(tokenizer_path)
-            self.lang_model = self.lang_model.bfloat16()
+            self.lang_model = AutoModelForCausalLM.from_pretrained(
+                self.tokenizer_path, local_files_only=local_files_only
+            ).to(self.model_type) # bfloat16, float16, float32
 
+        # llama-7b dim=4096, bloom dim=1024,
         self.hidden_size = self.lang_model.config.hidden_size
-
         self.lang_model.resize_token_embeddings(len(self.tokenizer))
+
         self.mapper = nn.Sequential(
             nn.Linear(768, self.hidden_size),
             nn.LayerNorm(self.hidden_size)
         )
-
 
     def tokenize(self, text):
         batch_text = self.tokenizer(
@@ -161,7 +170,13 @@ class LangModel(nn.Module):
         hist_locations = (input_ids >= self.hist_token_id[0]) & (input_ids <= self.hist_token_id[-1])
         cand_locations = (input_ids >= self.cand_token_id[0]) & (input_ids <= self.cand_token_id[-1])
 
-        inputs_embeds = self.lang_model.model.embed_tokens(input_ids)
+        if not self.is_bloom:
+            # llama-7b
+            inputs_embeds = self.lang_model.model.embed_tokens(input_ids)
+        else:
+            # bloom-560M
+            inputs_embeds = self.lang_model.transformer.word_embeddings(input_ids)
+
         if cand_locations.sum() != 0:
             inputs_embeds[cand_locations] += self.mapper(kwargs['cand_vis'])
         if hist_locations.sum() != 0:
@@ -178,7 +193,12 @@ class LangModel(nn.Module):
         labels = None
         if 'labels' in kwargs:
             labels = kwargs.pop('labels')
-        outputs = self.lang_model.model(*input, **kwargs)
+
+        if not self.is_bloom:
+            outputs = self.lang_model.model(*input, **kwargs)
+        else:
+            outputs = self.lang_model.transformer(*input, **kwargs)
+
         hidden_states = outputs[0]
         logits = self.lang_model.lm_head(hidden_states)
 
@@ -293,15 +313,19 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         super().__init__(config)
 
         self.img_embeddings = ImageEmbeddings(config)
-        self.lang_model = LangModel()
+
+        self.lang_model = LangModel(config)
+        self.hidden_size = self.lang_model.hidden_size
+        self.model_type = self.lang_model.model_type
+
         self.vp_pos_embeddings = nn.Sequential(
             nn.Linear(config.angle_feat_size*2, config.hidden_size),
             BertLayerNorm(config.hidden_size, eps=1e-12)
         )
 
-        self.local_sap_head = ClsPrediction(self.lang_model.hidden_size).bfloat16()
+        self.local_sap_head = ClsPrediction(self.hidden_size).to(self.model_type)
         if self.config.obj_feat_size > 0:
-            self.og_head = ClsPrediction(self.lang_model.hidden_size).bfloat16()
+            self.og_head = ClsPrediction(self.hidden_size).to(self.model_type)
 
         self.instruction = None
         self.history = None
@@ -400,7 +424,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
                 cand_vis = vp_embeds[cand_masks],
                 hist_vis = hist_vis_input,
             )
-            local_logits = torch.zeros((vp_embeds.shape[0], vp_embeds.shape[1])).to(vp_embeds.device).bfloat16()
+            local_logits = torch.zeros((vp_embeds.shape[0], vp_embeds.shape[1])).to(vp_embeds.device).to(self.model_type)
             local_logits.masked_fill_(cand_masks.logical_not(), -float('inf'))
             local_logits[cand_masks] = self.local_sap_head(hidden_states).squeeze()
             return {

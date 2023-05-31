@@ -371,6 +371,9 @@ class VLNModel(nn.Module):
 
 
 class BertVLNModel(object):
+    """
+    @function: VLN-DUET Pipeline with LLMs
+    """
     def __init__(self, args, logger=None):
         super().__init__()
         self.args = args

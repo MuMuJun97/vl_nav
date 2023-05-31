@@ -112,12 +112,20 @@ def dist_models(args, vln_model: BertVLNModel, language_model=None, logger=None)
 
 
 def main():
+    """
+    @file: duet/map_nav_src_llm/llm_training.py
+    @function: VLN-DUET Baseline, use LLaMa-7B or other LLMs as language model.
+    @param:
+        args.enable_language_model = False: disable DUET Pipeline
+                                   = True: enable DUET Pipeline
+    """
     args = read_args()
     assert args.r2r_tok
-    args.enable_language_model = False # disable LLaMa-7B, use VLN-BERT
-    args.val = True # enable validation when training
+    args.enable_language_model = False
+    # enable validation when training
+    args.val = True
     if args.val:
-        args.val_split = 'val_unseen'
+        args.val_split = 'val_unseen' # validation on val_unseen split
 
     logger, global_cfg = init_config(args)
     random_seed(seed=args.seed)
@@ -168,11 +176,14 @@ def main():
         args.ignoreid = -100
         args.dropout = 0.5
         args.expert_policy = 'spl'
+
+        # we re-construct DUET Pipeline with LLMs
         vln_model = BertVLNModel(
             args, logger=logger
         )
         language_model = None
         tokenizer = None
+
     random_seed(args.seed + args.rank)
 
     ############# Dataset #############

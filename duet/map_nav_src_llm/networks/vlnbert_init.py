@@ -14,32 +14,20 @@ def get_tokenizer(args):
 def get_vlnbert_models_ddp(args, config=None):
     
     from transformers import PretrainedConfig
-    from networks.vilmodel import GlocalTextPathNavCMT
+    from .vilmodel import GlocalTextPathNavCMT
 
     from transformers.utils import logging
     logging.set_verbosity_error()
 
     model_name_or_path = None # args.bert_ckpt_file
     new_ckpt_weights = {}
-    if model_name_or_path is not None:
-        ckpt_weights = torch.load(model_name_or_path)
-        for k, v in ckpt_weights.items():
-            if k.startswith('module'):
-                k = k[7:]    
-            if '_head' in k or 'sap_fuse' in k:
-                new_ckpt_weights['bert.' + k] = v
-            else:
-                new_ckpt_weights[k] = v
+
     cfg_name = 'bert-base-uncased'
-    # if args.tokenizer == 'xlm':
-    #     cfg_name = 'xlm-roberta-base'
-    # else:
-    #     cfg_name = 'bert-base-uncased'
+
     vis_config = PretrainedConfig.from_pretrained(cfg_name)
 
-    # if args.tokenizer == 'xlm':
-    #     vis_config.type_vocab_size = 2
-    
+    vis_config.precision = args.precision
+    vis_config.tokenizer_path = args.tokenizer_path
     vis_config.max_action_steps = 100
     vis_config.image_feat_size = args.image_feat_size
     vis_config.angle_feat_size = args.angle_feat_size

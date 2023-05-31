@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 import torch.nn as nn
 from tqdm import tqdm
-from models.vln_model import BertVLNModel
+from models.vln_model_llm import BertVLNModel
 from torch.nn.utils.rnn import pad_sequence
 from duet.map_nav_src_llm.utils.ops import pad_tensors, gen_seq_masks
 from collections import defaultdict
@@ -16,7 +16,7 @@ from duet.map_nav_src_llm.networks.graph_utils import calculate_vp_rel_pos_fts, 
 from duet.map_nav_src_llm.networks.ops import pad_tensors_wgrad
 from duet.map_nav_src_llm.r2r.eval_utils import cal_dtw
 from duet.map_nav_src_llm.utils.distributed import all_gather
-
+from contextlib import nullcontext
 
 class Metrics(object):
     def __init__(self):
@@ -40,14 +40,13 @@ class NavigationAgent(object):
         # buffer
         self.scanvp_cands = {}
 
-    def get_instruction(self, item):
-        data_type = 'r2r' #TODO
+    def get_instruction(self, item, data_type):
         if data_type == 'r2r':
             return 'Travel following the instruction, you can not ask for help. Instruction: ' \
                 + item['instruction']
         elif data_type == 'soon':
             return 'Find the described target, you can not ask for help. Target: ' \
-                + item['instruction']['instruction']
+                + item['instruction']
         elif data_type == 'reverie':
             return 'Go to the location to complete the given task, you can not ask for help. Task: ' \
                 + item['instruction']
@@ -68,9 +67,13 @@ class NavigationAgent(object):
                 self.scanvp_cands[scanvp].setdefault(cand['viewpointId'], {})
                 self.scanvp_cands[scanvp][cand['viewpointId']] = cand['pointId']
 
-    def language_variable(self, obs):
-        raw_instruction = [self.get_instruction(ob) for ob in obs]
-        return {'instruction': raw_instruction}
+    def language_variable(self, obs, data_type):
+        raw_instruction = []
+        for ob, dt in zip(obs, data_type):
+            raw_instruction.append(
+                self.get_instruction(ob, dt)
+            )
+        return raw_instruction
 
     def panorama_feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
@@ -324,7 +327,7 @@ def vln_train_one_epoch(
             iter_loss += sample_ml_loss
             loss_metric.accumulate(sample_ml_loss.item())
 
-        iter_loss.backward()
+        # iter_loss.backward()
 
         if args.enable_language_model:
             raise NotImplementedError
@@ -351,6 +354,7 @@ def rollout(
         nav_agent: NavigationAgent,
         vln_model: BertVLNModel,
         entropy_metric,
+        do_backward=False,
 ):
     obs = batch_dict['observations']
     envs = batch_dict['env']
@@ -368,8 +372,7 @@ def rollout(
     start_pos = [ob['position'] for ob in obs]
 
     # Language input: txt_ids, txt_masks
-    language_inputs = nav_agent.language_variable(obs)
-    instruction = language_inputs['instruction']
+    instruction = nav_agent.language_variable(obs, data_type=batch_dict['data_type'])
     history = []
     hist_vis = []
     for idx in range(len(instruction)):
@@ -383,100 +386,128 @@ def rollout(
     # Init the logs
     entropys = []
     ml_loss = 0.
+    cnt_loss = 0.
+    flag = False
 
     for t in range(args.max_action_len):
-        # graph representation
-        pano_inputs = nav_agent.panorama_feature_variable(obs)
 
-        pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)
-
-        # navigation policy
-        nav_inputs = \
-            nav_agent.nav_vp_variable(
-                obs, start_pos, pano_embeds, pano_inputs['cand_vpids'],
-                pano_inputs['view_lens'], pano_inputs['nav_types'],
-            )
-        nav_inputs['instruction'] = instruction
-        nav_inputs['history'] = history
-        nav_inputs['hist_vis'] = hist_vis
-
-        nav_outs = vln_model.vln_bert('navigation', nav_inputs)
-
-        nav_logits = nav_outs['local_logits'].float()
-        nav_vpids = nav_inputs['vp_cand_vpids']
-        nav_probs = torch.softmax(nav_logits, 1)
-
-        # Imitation Learning
-        if train_ml is not None or feedback == 'gt':
-            # Supervised training
-            if args.dataset == 'r2r':
-                nav_targets = nav_agent.teacher_action_r4r(
-                    obs, nav_vpids, ended,
-                    visited_masks=None,
-                    imitation_learning=(feedback == 'teacher'), t=t, traj=traj
-                )
-            ml_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
-
-        # Determinate the next navigation viewpoint
-        if feedback == 'teacher':
-            a_t = nav_targets  # teacher forcing
-        elif feedback == 'sample':
-            c = torch.distributions.Categorical(nav_probs)
-            entropy_metric.accumulate(c.entropy().sum().item()) # For log
-            entropys.append(c.entropy())  # For optimization
-            a_t = c.sample().detach()
-        elif feedback == 'argmax':
-            _, a_t = nav_logits.max(1)  # student forcing - argmax
-            a_t = a_t.detach()
-        elif feedback == 'gt':
-            a_t = nav_targets # force gt path
-        else:
-            print(feedback)
-            sys.exit('Invalid feedback option')
-
-        for idx in range(len(a_t)):
-            if a_t[idx] == -100:
-                continue
-            history[idx] += '<hist>'
-            hist_vis[idx].append(nav_outs['vp_embeds'][idx][a_t[idx]])
-
-        # Determine stop actions
-        if feedback == 'teacher' or feedback == 'sample':  # in training
-            a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
-        else:
-            a_t_stop = a_t == 0
-
-        # Prepare environment action
-        cpu_a_t = []
-        for i in range(batch_size):
-            if a_t_stop[i] or ended[i] or (t == args.max_action_len - 1):
-                cpu_a_t.append(None)
-                just_ended[i] = True
+        if isinstance(vln_model.vln_bert, torch.nn.parallel.DistributedDataParallel):
+            # multi-gpu
+            if ended.all() or t == args.max_action_len - 1:
+                flag = True
+                context = nullcontext
             else:
-                cpu_a_t.append(nav_vpids[i][a_t[i]])
+                context = vln_model.vln_bert.no_sync
+        else:
+            # single-gpu
+            if ended.all() or t == args.max_action_len - 1:
+                break
+                context = nullcontext
+            else:
+                context = nullcontext
 
-        # Make action and get the new state
-        nav_agent.make_equiv_action(cpu_a_t, obs, traj, env=envs)
+        with context():
 
-        # get new observation and update graph
-        obs = []
-        for b_i in range(batch_size):
-            obs.append(
-                r2r_dataloader.dataset.get_obs(
-                    items=[batch_dict['item'][b_i]],
-                    env=envs[b_i]
-                )[0]
-            )
-        nav_agent.update_scanvp_cands(obs)
+            pano_inputs = nav_agent.panorama_feature_variable(obs)
 
-        ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
+            pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)
 
-        # Early exit if all ended
-        if ended.all():
-            break
+            # navigation policy
+            nav_inputs = \
+                nav_agent.nav_vp_variable(
+                    obs, start_pos, pano_embeds, pano_inputs['cand_vpids'],
+                    pano_inputs['view_lens'], pano_inputs['nav_types'],
+                )
+            nav_inputs['instruction'] = instruction
+            nav_inputs['history'] = history
+            nav_inputs['hist_vis'] = hist_vis
 
-    if train_ml is not None:
-        ml_loss = ml_loss # * train_ml / batch_size
+            nav_outs = vln_model.vln_bert('navigation', nav_inputs)
+
+            nav_logits = nav_outs['local_logits']
+            nav_vpids = nav_inputs['vp_cand_vpids']
+            nav_probs = torch.softmax(nav_logits, 1)
+
+            # Imitation Learning
+            if train_ml is not None or feedback == 'gt':
+                # Supervised training
+                if args.dataset == 'r2r':
+                    nav_targets = nav_agent.teacher_action_r4r(
+                        obs, nav_vpids, ended,
+                        visited_masks=None,
+                        imitation_learning=(feedback == 'teacher'), t=t, traj=traj
+                    )
+                cnt_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
+                ml_loss += cnt_loss.detach()
+                cnt_loss.backward()
+                cnt_loss = 0.
+
+            # Determinate the next navigation viewpoint
+            if feedback == 'teacher':
+                a_t = nav_targets  # teacher forcing
+            elif feedback == 'sample':
+                try:
+                    c = torch.distributions.Categorical(nav_probs.float())
+                except Exception as e:
+                    nav_outs = vln_model.vln_bert('navigation', nav_inputs)
+
+                entropy_metric.accumulate(c.entropy().sum().item()) # For log
+                entropys.append(c.entropy())  # For optimization
+                a_t = c.sample().detach()
+            elif feedback == 'argmax':
+                _, a_t = nav_logits.max(1)  # student forcing - argmax
+                a_t = a_t.detach()
+            elif feedback == 'gt':
+                a_t = nav_targets # force gt path
+            else:
+                print(feedback)
+                sys.exit('Invalid feedback option')
+
+            for idx in range(len(a_t)):
+                if a_t[idx] == -100:
+                    continue
+                history[idx] += '<hist>'
+                hist_vis[idx].append(nav_outs['vp_embeds'][idx][a_t[idx]])
+
+            # Determine stop actions
+            if feedback == 'teacher' or feedback == 'sample':  # in training
+                a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
+            else:
+                a_t_stop = a_t == 0
+
+            # Prepare environment action
+            cpu_a_t = []
+            for i in range(batch_size):
+                if a_t_stop[i] or ended[i] or (t == args.max_action_len - 1):
+                    cpu_a_t.append(None)
+                    just_ended[i] = True
+                else:
+                    cpu_a_t.append(nav_vpids[i][a_t[i]])
+
+            # Make action and get the new state
+            nav_agent.make_equiv_action(cpu_a_t, obs, traj, env=envs)
+
+            # get new observation and update graph
+            obs = []
+            for b_i in range(batch_size):
+                obs.append(
+                    r2r_dataloader.dataset.get_obs(
+                        items=[batch_dict['item'][b_i]],
+                        env=envs[b_i]
+                    )[0]
+                )
+            nav_agent.update_scanvp_cands(obs)
+
+            ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
+
+            # # Early exit if all ended
+            # if ended.all():
+            #     break
+            if flag:
+                break
+
+    # if train_ml is not None:
+    #     ml_loss = ml_loss # * train_ml / batch_size
 
     return ml_loss, traj
 
@@ -494,7 +525,7 @@ def get_results(pred_results, detailed_output=False):
         pred_output.append({'instr_id': k, 'trajectory': v['path']})
     return pred_output
 
-
+@torch.no_grad()
 def vln_val_one_epoch(
         args,
         vln_model: BertVLNModel,
@@ -511,6 +542,7 @@ def vln_val_one_epoch(
     feedback = 'argmax'
     use_dropout = False
     results = {}
+    entropy_metric = Metrics()
 
     if args.enable_language_model:
         vln_model.eval()
@@ -538,7 +570,8 @@ def vln_val_one_epoch(
 
         ml_loss, traj = rollout(
             args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
-            train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model
+            train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model,
+            entropy_metric=entropy_metric,
         )
 
         for s_traj in traj:

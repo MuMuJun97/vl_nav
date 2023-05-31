@@ -23,7 +23,7 @@ def load_r2r_data(anno_file, max_instr_len=200):
             new_item = dict(item)
             new_item['raw_idx'] = i
             new_item['sample_idx'] = sample_index
-            new_item['instr_id'] = '{}_{}'.format(item['path_id'], j)
+            new_item['instr_id'] = 'r2r_{}_{}'.format(item['path_id'], j)
             new_item['instruction'] = instr
             new_item['instr_encoding'] = item['instr_encodings'][j][:max_instr_len]
             del new_item['instructions']
@@ -45,24 +45,21 @@ def load_reverie_data(anno_file):
         for j, instr in enumerate(item['instructions']):
             new_item = dict(item)
             new_item['sample_idx'] = sample_index
-            new_item['instr_id'] = item['path_id']
+            new_item['instr_id'] = 'reverie_{}'.format(item['path_id'])
             new_item['instruction'] = instr
             del new_item['instructions']
             new_item['data_type'] = 'reverie'
+
+            new_item['raw_idx'] = None
+            new_item['instr_encoding'] = None
+
             new_data.append(new_item)
             sample_index += 1
     return new_data
 
 
 def load_soon_data(anno_file):
-    soon_questions = [
-        "what does the {target} look like?",  # 0
-        "where is the {target}?",  # 1
-        "which room or area is the {target} in?",  # 2
-        "how to find the {target}?",  # 3
-    ]
 
-    # assert anno_file.exists()
     with open(str(anno_file)) as f:
         data = json.load(f)
     new_data = []
@@ -70,11 +67,11 @@ def load_soon_data(anno_file):
     for i, item in enumerate(data):
         for j, path in enumerate(item['path']):
             # Split multiple instructions into separate entries
-            for k, instr in enumerate(item['instructions'][0][:5]):
+            for k, instr in enumerate(item['instructions']):
                 new_item = dict()
                 new_item['sample_idx'] = sample_index
                 # soon: idx-path_idx-instr_idx
-                new_item['instr_id'] = "{}_{}_{}".format(i, j, k)
+                new_item['instr_id'] = "soon_{}_{}_{}".format(i, j, k)
 
                 # current path
                 new_item['path'] = path
@@ -85,27 +82,11 @@ def load_soon_data(anno_file):
                 new_item['bbox'] = random.choice(bboxes)
                 new_item['scan'] = new_item['bbox']['scan']
 
-                # soon instructions
-                if k == 4:
-                    text = instr # full instruction -> navigate
-                    # question = "How to find the object described in the instruction?"
-                    # answer = 'N/A'
-                else:
-                    continue
-                    # full environment -> question and answer
-                    text = 'N/A'
-                    target = new_item['bbox']['obj_name']
-                    if target is None or target == '' or target == 'None':
-                        target = 'target'
-                    question = soon_questions[j].format(target=target)
-                    answer = instr
-                new_item['instruction'] = {
-                    'instruction': text,
-                    # 'question': question,
-                    # 'answer': answer,
-                    # 'full_instruction': instr
-                }
-
+                new_item['instruction'] = instr[4]  # full Instruction
+                new_item['path_id'] = '{}_{}'.format(i, j)
+                new_item['raw_idx'] = None
+                new_item['instr_encoding'] = None
+                new_item['heading'] = 0.0
                 new_item['data_type'] = 'soon'
                 new_data.append(new_item)
                 sample_index += 1
@@ -270,7 +251,7 @@ def load_eqa_data(anno_file, split='train', vis=False):
     return new_data
 
 
-def load_cvdn_data(anno_file, shortest_paths):
+def load_cvdn_data(anno_file, shortest_paths=None):
     """
     @Dataset Params:
         inst_idx: unique index of this task instance
@@ -409,6 +390,50 @@ def load_cvdn_data(anno_file, shortest_paths):
 
     # ignore_count=1096: filter 23.11% (1096/4742) samples if there is no dialog history
     # long_lengths=985: filter 20.77% (985/4742)
+    return new_data
+
+
+def load_cvdn_raw(anno_file, path_type='trusted_path'):
+    with open(anno_file,"r") as f:
+        data = json.load(f)
+    new_data = []
+    sample_idx = 0
+    for i, item in enumerate(data):
+        new_item = dict(item)
+        new_item['heading'] = item['start_pano']['heading']
+
+        # Add 'trusted_path' to gt metadata if necessary.
+        if path_type == 'trusted_path':
+            planner_goal = item['planner_path'][-1]
+            if planner_goal in item['player_path'][1:]:
+                new_item['path'] = item['player_path'][:]
+            else:
+                new_item['path'] = item['planner_path'][:]
+        else:
+            raise NotImplementedError
+
+        if len(item['dialog_history']) == 0:
+            new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
+        else:
+            new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
+            sentences = []
+            for turn in item['dialog_history']:
+                if turn['message'][-1] == '?' or turn['message'][-1] == '.':
+                    sentences.append(turn['message'])
+                else:
+                    sentences.append(turn['message'] + '.')
+            sentences = " ".join(sentences)
+            new_item['instruction'] += sentences
+
+        new_item['path_id'] = item['inst_idx']
+        new_item['raw_idx'] = None
+        new_item['instr_encoding'] = None
+        new_item['data_type'] = 'cvdn'
+        new_item['sample_idx'] = sample_idx
+        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, item['inst_idx'])
+
+        new_data.append(new_item)
+        sample_idx += 1
     return new_data
 
 
