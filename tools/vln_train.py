@@ -399,7 +399,7 @@ def rollout(
         train_rl,
         nav_agent,
         vln_model: BertVLNModel,
-        entropy_metric,
+        entropy_metric=None,
 ):
     obs = batch_dict['observations']
     envs = batch_dict['env']
@@ -606,6 +606,7 @@ def vln_val_one_epoch(
     feedback = 'argmax'
     use_dropout = False
     results = {}
+    entropy_metric = Metrics()
 
     if args.enable_language_model:
         vln_model.eval()
@@ -633,7 +634,8 @@ def vln_val_one_epoch(
 
         ml_loss, traj = rollout(
             args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
-            train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model
+            train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model,
+            entropy_metric=entropy_metric,
         )
 
         for s_traj in traj:
