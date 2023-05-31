@@ -45,7 +45,7 @@ def load_reverie_data(anno_file):
         for j, instr in enumerate(item['instructions']):
             new_item = dict(item)
             new_item['sample_idx'] = sample_index
-            new_item['instr_id'] = 'reverie_{}'.format(item['path_id'])
+            new_item['instr_id'] = 'reverie_{}_{}'.format(item['path_id'], sample_index)
             new_item['instruction'] = instr
             del new_item['instructions']
             new_item['data_type'] = 'reverie'
@@ -90,6 +90,50 @@ def load_soon_data(anno_file):
                 new_item['data_type'] = 'soon'
                 new_data.append(new_item)
                 sample_index += 1
+    return new_data
+
+
+def load_cvdn_raw(anno_file, path_type='trusted_path'):
+    with open(anno_file,"r") as f:
+        data = json.load(f)
+    new_data = []
+    sample_idx = 0
+    for i, item in enumerate(data):
+        new_item = dict(item)
+        new_item['heading'] = item['start_pano']['heading']
+
+        # Add 'trusted_path' to gt metadata if necessary.
+        if path_type == 'trusted_path':
+            planner_goal = item['planner_path'][-1]
+            if planner_goal in item['player_path'][1:]:
+                new_item['path'] = item['player_path'][:]
+            else:
+                new_item['path'] = item['planner_path'][:]
+        else:
+            raise NotImplementedError
+
+        if len(item['dialog_history']) == 0:
+            new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
+        else:
+            new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
+            sentences = []
+            for turn in item['dialog_history']:
+                if turn['message'][-1] == '?' or turn['message'][-1] == '.':
+                    sentences.append(turn['message'])
+                else:
+                    sentences.append(turn['message'] + '.')
+            sentences = " ".join(sentences)
+            new_item['instruction'] += sentences
+
+        new_item['path_id'] = item['inst_idx']
+        new_item['raw_idx'] = None
+        new_item['instr_encoding'] = None
+        new_item['data_type'] = 'cvdn'
+        new_item['sample_idx'] = sample_idx
+        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, item['inst_idx'])
+
+        new_data.append(new_item)
+        sample_idx += 1
     return new_data
 
 
@@ -390,50 +434,6 @@ def load_cvdn_data(anno_file, shortest_paths=None):
 
     # ignore_count=1096: filter 23.11% (1096/4742) samples if there is no dialog history
     # long_lengths=985: filter 20.77% (985/4742)
-    return new_data
-
-
-def load_cvdn_raw(anno_file, path_type='trusted_path'):
-    with open(anno_file,"r") as f:
-        data = json.load(f)
-    new_data = []
-    sample_idx = 0
-    for i, item in enumerate(data):
-        new_item = dict(item)
-        new_item['heading'] = item['start_pano']['heading']
-
-        # Add 'trusted_path' to gt metadata if necessary.
-        if path_type == 'trusted_path':
-            planner_goal = item['planner_path'][-1]
-            if planner_goal in item['player_path'][1:]:
-                new_item['path'] = item['player_path'][:]
-            else:
-                new_item['path'] = item['planner_path'][:]
-        else:
-            raise NotImplementedError
-
-        if len(item['dialog_history']) == 0:
-            new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
-        else:
-            new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
-            sentences = []
-            for turn in item['dialog_history']:
-                if turn['message'][-1] == '?' or turn['message'][-1] == '.':
-                    sentences.append(turn['message'])
-                else:
-                    sentences.append(turn['message'] + '.')
-            sentences = " ".join(sentences)
-            new_item['instruction'] += sentences
-
-        new_item['path_id'] = item['inst_idx']
-        new_item['raw_idx'] = None
-        new_item['instr_encoding'] = None
-        new_item['data_type'] = 'cvdn'
-        new_item['sample_idx'] = sample_idx
-        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, item['inst_idx'])
-
-        new_data.append(new_item)
-        sample_idx += 1
     return new_data
 
 

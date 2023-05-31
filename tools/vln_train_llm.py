@@ -355,6 +355,7 @@ def rollout(
         vln_model: BertVLNModel,
         entropy_metric,
         do_backward=False,
+        is_val=False, # in validation mode
 ):
     obs = batch_dict['observations']
     envs = batch_dict['env']
@@ -439,7 +440,9 @@ def rollout(
                     )
                 cnt_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
                 ml_loss += cnt_loss.detach()
-                cnt_loss.backward()
+
+                if not is_val:
+                    cnt_loss.backward()
                 cnt_loss = 0.
 
             # Determinate the next navigation viewpoint
@@ -449,7 +452,10 @@ def rollout(
                 try:
                     c = torch.distributions.Categorical(nav_probs.float())
                 except Exception as e:
-                    nav_outs = vln_model.vln_bert('navigation', nav_inputs)
+                    import ipdb
+                    ipdb.set_trace()
+                    print(e) # nan, -inf values, may caused from different data type.
+                    raise NotImplementedError
 
                 entropy_metric.accumulate(c.entropy().sum().item()) # For log
                 entropys.append(c.entropy())  # For optimization
@@ -525,6 +531,7 @@ def get_results(pred_results, detailed_output=False):
         pred_output.append({'instr_id': k, 'trajectory': v['path']})
     return pred_output
 
+
 @torch.no_grad()
 def vln_val_one_epoch(
         args,
@@ -571,7 +578,7 @@ def vln_val_one_epoch(
         ml_loss, traj = rollout(
             args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
             train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model,
-            entropy_metric=entropy_metric,
+            entropy_metric=entropy_metric, is_val=True
         )
 
         for s_traj in traj:
@@ -589,17 +596,30 @@ def vln_val_one_epoch(
     all_preds = all_gather(preds)
     all_preds = merge_dist_results(all_preds)
 
-    loss_str = "\n[Eval] {} epoch {}".format(args.val_split, epoch)
+    loss_str = "\n[Eval] {} epoch {}\n".format(args.val_split, epoch)
     if args.rank == 0:
-        score_summary, _ = r2r_dataloader.dataset.eval_metrics(all_preds, logger)
-        loss_str += ", %s ||| " % args.val_split
-        for metric, val in score_summary.items():
-            if metric == 'sr':
-                loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
-            else:
-                loss_str += ', %s: %.2f' % (metric, val)
+        multi_prefixs = set([pdata['instr_id'].split('_')[0] for pdata in all_preds])
+        useful_score_summary = None
+        for prefix in multi_prefixs:
+            one_preds = []
+            for pdata in all_preds:
+                if pdata['instr_id'].split('_')[0] == prefix:
+                    one_preds.append(pdata)
+
+            score_summary, _ = r2r_dataloader.dataset.eval_metrics(one_preds, logger)
+
+            if prefix == 'r2r':
+                useful_score_summary = score_summary
+            loss_str += "\n [Eval] dataset=[{}] \n".format(prefix)
+            for metric, val in score_summary.items():
+                if metric == 'sr':
+                    loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
+                else:
+                    loss_str += ', %s: %.2f' % (metric, val)
 
         logger.info(loss_str)
+        if useful_score_summary is not None:
+            score_summary = useful_score_summary
 
         # select model by Success Rate
         if score_summary['sr'] >= best_val[args.val_split]['sr']:

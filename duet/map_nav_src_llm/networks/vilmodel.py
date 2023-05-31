@@ -111,6 +111,8 @@ class LangModel(nn.Module):
         else:
             self.model_type = torch.float32
 
+        print("************ Use dtype: {} ************\n".format(self.model_type))
+
         if 'model_config.pkl' in self.tokenizer_path:
             # use local llama-7b
             _tokenizer_path = Path(self.tokenizer_path).parent.resolve().__str__()
