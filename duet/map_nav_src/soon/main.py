@@ -60,7 +60,8 @@ def build_dataset(args, rank=0, is_test=True):
         multi_endpoints=args.multi_endpoints, multi_startpoints=args.multi_startpoints,
     )
 
-    val_env_names = ['val_train', 'val_unseen_instrs', 'val_unseen_house']
+    # val_env_names = ['val_train', 'val_unseen_instrs', 'val_unseen_house']
+    val_env_names = ['val_unseen_house']
 
     if args.submit:
         val_env_names.append('test')

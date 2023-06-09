@@ -146,12 +146,14 @@ class SoonGMapObjectNavAgent(GMapObjectNavAgent):
                         obs, nav_inputs['vp_cand_vpids'], ended, visited_masks=None
                     )
                     ml_loss += self.criterion(nav_outs['local_logits'], local_nav_targets)  # local
-                # objec grounding 
-                obj_targets = self._teacher_object(obs, ended, pano_inputs['view_lens'])
-                # print(t, obj_targets[6], obj_logits[6], obs[6]['obj_ids'], pano_inputs['view_lens'][i], obs[6]['gt_obj_id'])
-                og_loss += self.criterion(obj_logits, obj_targets)
-                # print(F.cross_entropy(obj_logits, obj_targets, reduction='none'))
-                # print(t, 'og_loss', og_loss.item(), self.criterion(obj_logits, obj_targets).item())
+
+                # TODO we comment object grounding...
+                # # objec grounding
+                # obj_targets = self._teacher_object(obs, ended, pano_inputs['view_lens'])
+                # # print(t, obj_targets[6], obj_logits[6], obs[6]['obj_ids'], pano_inputs['view_lens'][i], obs[6]['gt_obj_id'])
+                # og_loss += self.criterion(obj_logits, obj_targets)
+                # # print(F.cross_entropy(obj_logits, obj_targets, reduction='none'))
+                # # print(t, 'og_loss', og_loss.item(), self.criterion(obj_logits, obj_targets).item())
                                                    
             # Determinate the next navigation viewpoint
             if self.feedback == 'teacher':
@@ -234,7 +236,10 @@ class SoonGMapObjectNavAgent(GMapObjectNavAgent):
             self.loss += ml_loss
             self.loss += og_loss
             self.logs['IL_loss'].append(ml_loss.item())
-            self.logs['OG_loss'].append(og_loss.item())
+            if og_loss == 0:
+                self.logs['OG_loss'].append(0)
+            else:
+                self.logs['OG_loss'].append(og_loss.item())
 
         return traj
               

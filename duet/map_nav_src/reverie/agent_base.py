@@ -187,7 +187,7 @@ class Seq2SeqAgent(BaseAgent):
                     self.rollout(
                         train_ml=self.args.ml_weight, train_rl=False, **kwargs
                     )
-                self.feedback = self.args.dagger_sample
+                self.feedback = self.args.dagger_sample  # 'sample'
                 self.rollout(train_ml=1, train_rl=False, **kwargs)
             else:
                 if self.args.ml_weight != 0:

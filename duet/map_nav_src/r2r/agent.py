@@ -65,10 +65,11 @@ class GMapNavAgent(Seq2SeqAgent):
                 used_viewidxs.add(cc['pointId'])
             # non cand views
             view_img_fts.extend([x[:self.args.image_feat_size] for k, x \
-                in enumerate(ob['feature']) if k not in used_viewidxs])
+                                in enumerate(ob['feature']) if k not in used_viewidxs])
             view_ang_fts.extend([x[self.args.image_feat_size:] for k, x \
-                in enumerate(ob['feature']) if k not in used_viewidxs])
+                                in enumerate(ob['feature']) if k not in used_viewidxs])
             nav_types.extend([0] * (36 - len(used_viewidxs)))
+
             # combine cand views and noncand views
             view_img_fts = np.stack(view_img_fts, 0)    # (n_views, dim_ft)
             view_ang_fts = np.stack(view_ang_fts, 0)

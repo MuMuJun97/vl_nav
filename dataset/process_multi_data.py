@@ -9,6 +9,8 @@ import networkx as nx
 from pathlib import Path
 import cv2
 import ast
+import jsonlines
+debug = False
 
 
 def load_r2r_data(anno_file, max_instr_len=200):
@@ -31,7 +33,10 @@ def load_r2r_data(anno_file, max_instr_len=200):
             new_item['data_type'] = 'r2r'
             new_data.append(new_item)
             sample_index += 1
-    return new_data
+    if debug:
+        return new_data[:20]
+    else:
+        return new_data
 
 
 def load_reverie_data(anno_file):
@@ -44,8 +49,16 @@ def load_reverie_data(anno_file):
         # Split multiple instructions into separate entries
         for j, instr in enumerate(item['instructions']):
             new_item = dict(item)
+
+            if 'objId' in item:
+                new_item['instr_id'] = '%s_%s_%s_%d' % ('reverie', str(item['path_id']), str(item['objId']), j)
+            else:
+                new_item['path_id'] = item['id']
+                new_item['instr_id'] = '%s_%s_%d' % ('reverie', item['id'], j)
+                new_item['objId'] = None
+
             new_item['sample_idx'] = sample_index
-            new_item['instr_id'] = 'reverie_{}_{}'.format(item['path_id'], sample_index)
+            # new_item['instr_id'] = 'reverie_{}_{}'.format(item['path_id'], sample_index)
             new_item['instruction'] = instr
             del new_item['instructions']
             new_item['data_type'] = 'reverie'
@@ -55,42 +68,66 @@ def load_reverie_data(anno_file):
 
             new_data.append(new_item)
             sample_index += 1
-    return new_data
+    if debug:
+        return new_data[:20]
+    else:
+        return new_data
 
 
 def load_soon_data(anno_file):
 
-    with open(str(anno_file)) as f:
-        data = json.load(f)
+    # with open(str(anno_file)) as f:
+    #     data = json.load(f)
+    data = []
+    with jsonlines.open(str(anno_file), 'r') as f:
+        for item in f:
+            item['end_image_ids'] = [x['image_id'] for x in item['bboxes']]
+            item['image_id_to_obj_label'] = {x['image_id']: x.get('pseudo_label', None) for x in item['bboxes']}
+            new_bboxes = {}
+            for bbox in item['bboxes']:
+                new_bboxes[bbox['image_id']] = bbox
+            item['bboxes'] = new_bboxes
+            data.append(item)
+
     new_data = []
     sample_index = 0
     for i, item in enumerate(data):
-        for j, path in enumerate(item['path']):
-            # Split multiple instructions into separate entries
-            for k, instr in enumerate(item['instructions']):
-                new_item = dict()
-                new_item['sample_idx'] = sample_index
-                # soon: idx-path_idx-instr_idx
-                new_item['instr_id'] = "soon_{}_{}_{}".format(i, j, k)
+        # for j, path in enumerate(item['path']):
+        # Split multiple instructions into separate entries
+        for k, instr in enumerate(item['instructions']):
+            new_item = dict(item)
+            new_item['sample_idx'] = sample_index
+            # soon: idx-path_idx-instr_idx
+            new_item['instr_id'] = "soon_{}_{}_{}".format(i, item['path_id'], k)
 
-                # current path
-                new_item['path'] = path
-                bboxes = []
-                for bbox in item['bboxes']:
-                    if bbox['image_id'] == path[-1]:
-                        bboxes.append(bbox)
-                new_item['bbox'] = random.choice(bboxes)
-                new_item['scan'] = new_item['bbox']['scan']
+            # current path
+            # new_item['path'] = path
+            # path = new_item['path']
 
-                new_item['instruction'] = instr[4]  # full Instruction
-                new_item['path_id'] = '{}_{}'.format(i, j)
-                new_item['raw_idx'] = None
-                new_item['instr_encoding'] = None
-                new_item['heading'] = 0.0
-                new_item['data_type'] = 'soon'
-                new_data.append(new_item)
-                sample_index += 1
-    return new_data
+            # bboxes = []
+            # for bbox in item['bboxes']:
+            #     if bbox['image_id'] == path[-1]:
+            #         bboxes.append(bbox)
+            # new_item['bbox'] = random.choice(bboxes)
+            # new_item['scan'] = new_item['bbox']['scan']
+
+            # new_item['instruction'] = instr[4]  # full Instruction
+
+            new_item['instruction'] = instr['full']
+            # new_item['path_id'] = '{}_{}'.format(i, k)
+            new_item['raw_idx'] = None
+            new_item['instr_encoding'] = None
+            new_item['heading'] = 0.0
+            new_item['data_type'] = 'soon'
+            del new_item['instructions']
+            del new_item['instr_encodings']
+            new_data.append(new_item)
+            sample_index += 1
+
+    if debug:
+        return new_data[:20]
+    else:
+        return new_data
 
 
 def load_cvdn_raw(anno_file, path_type='trusted_path'):
@@ -100,17 +137,18 @@ def load_cvdn_raw(anno_file, path_type='trusted_path'):
     sample_idx = 0
     for i, item in enumerate(data):
         new_item = dict(item)
-        new_item['heading'] = item['start_pano']['heading']
+        new_item['heading'] = None # item['start_pano']['heading']
+        new_item['path'] = None
 
         # Add 'trusted_path' to gt metadata if necessary.
-        if path_type == 'trusted_path':
-            planner_goal = item['planner_path'][-1]
-            if planner_goal in item['player_path'][1:]:
-                new_item['path'] = item['player_path'][:]
-            else:
-                new_item['path'] = item['planner_path'][:]
-        else:
-            raise NotImplementedError
+        # if path_type == 'trusted_path':
+        #     planner_goal = item['planner_path'][-1]
+        #     if planner_goal in item['player_path'][1:]:
+        #         new_item['path'] = item['player_path'][:]
+        #     else:
+        #         new_item['path'] = item['planner_path'][:]
+        # else:
+        #     raise NotImplementedError
 
         if len(item['dialog_history']) == 0:
             new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
@@ -119,22 +157,32 @@ def load_cvdn_raw(anno_file, path_type='trusted_path'):
             sentences = []
             for turn in item['dialog_history']:
                 if turn['message'][-1] == '?' or turn['message'][-1] == '.':
-                    sentences.append(turn['message'])
+                    msg = turn['message']
                 else:
-                    sentences.append(turn['message'] + '.')
-            sentences = " ".join(sentences)
+                    msg = turn['message'] + "."
+                if turn['role'] == 'navigator':
+                    sentences.append("Question: " + msg + "\n")
+                elif turn['role'] == 'oracle':
+                    sentences.append("Answer: " + msg + "\n")
+                else:
+                    raise NotImplementedError
+            sentences = "".join(sentences)
             new_item['instruction'] += sentences
-
-        new_item['path_id'] = item['inst_idx']
+        if new_item['instruction'][-1] == '\n':
+            new_item['instruction'] = new_item['instruction'][:-1]
+        new_item['path_id'] = item['instr_id']
         new_item['raw_idx'] = None
         new_item['instr_encoding'] = None
         new_item['data_type'] = 'cvdn'
         new_item['sample_idx'] = sample_idx
-        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, item['inst_idx'])
+        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, item['instr_id'])
 
         new_data.append(new_item)
         sample_idx += 1
-    return new_data
+    if debug:
+        return new_data[:20]
+    else:
+        return new_data
 
 
 def load_fr2r_data(anno_file):

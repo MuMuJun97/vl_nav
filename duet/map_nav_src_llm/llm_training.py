@@ -14,13 +14,14 @@ from tools.parser import read_args, random_seed
 from tools.train.distributed import init_distributed_device
 from open_flamingo import create_model_and_transforms
 from dataset.dataset_src import SrcDataset, build_dataloader
-from duet.map_nav_src_llm.utils.data import ImageFeaturesDB
+from duet.map_nav_src_llm.utils.data import \
+    ImageFeaturesDB, ObjectFeatureDB, load_obj2vps, SOONObjectFeatureDB
 from tools.finetune_utils import (get_tokenizer_token_ids, )
 from tools.train.train_utils import (
     get_grouped_params, check_checkpoint,
     get_checkpoint, save_checkpoint,
 )
-from models.vln_model_llm import VLNModel, BertVLNModel
+from models.vln_model_llm import BertVLNModel
 from tools.vln_train_llm import vln_train_one_epoch, NavigationAgent, vln_val_one_epoch
 from transformers import get_constant_schedule_with_warmup
 
@@ -40,8 +41,28 @@ def init_config(args):
     # offline image features, from vln-duet
     # downstream duet datasets
     _source_dir = Path(__file__).resolve().parent.parent.parent
+
     args.img_ft_file = _source_dir / "build/duet/R2R/features/pth_vit_base_patch16_224_imagenet.hdf5"
-    args.image_feat_size = 769
+    args.obj_ft_file = _source_dir / "build/duet/REVERIE/features/obj.avg.top3.min80_vit_base_patch16_224_imagenet.hdf5"
+    args.soon_ft_file = _source_dir / "build/duet/SOON/features/filtered_butd_bboxes.hdf5"
+
+    args.image_feat_size = 768
+    args.obj_feat_size = 2048
+    args.angle_feat_size = 4
+
+    args.num_l_layers = 9
+    args.num_pano_layers = 2
+    args.num_x_layers = 4
+
+    args.seed = 0
+    args.dataset = 'r2r'
+    args.act_visited_nodes = False
+    args.enc_full_graph = True
+    args.graph_sprels = True
+
+    args.ignoreid = -100
+    args.dropout = 0.5
+    args.expert_policy = 'spl'
     args.source_dir = _source_dir.__str__()
     args.vln_bert_pretrained_config = str(_source_dir / "tools/cfgs/vln_duet/vln_bert_pretrained_config.json")
 
@@ -132,51 +153,8 @@ def main():
 
     ############# Language Model #############
     if args.enable_language_model:
-        language_model, image_processor, tokenizer = create_model_and_transforms(
-            args.vision_encoder_path, # "ViT-L-14"
-            args.vision_encoder_pretrained, # "openai"
-            args.lm_path, # 'facebook/opt-125m'
-            args.tokenizer_path if args.tokenizer_path else args.lm_path, # 'facebook/opt-125m'
-            enable_offline_vision_encoder=True,
-            cross_attn_every_n_layers=args.cross_attn_every_n_layers, # 1
-            use_local_files=args.offline, # False
-            use_media_placement_augmentation=args.use_media_placement_augmentation, # True
-            unfreeze_llm=args.unfreeze_llm, # unfreeze language model
-            args=args,
-        )
-
-        ################### Word Tokens ###################
-        # <PAD> on the left
-        tokenizer.padding_side = "left"
-        args.image_token_ids, args.action_token_ids = get_tokenizer_token_ids(tokenizer)
-        args.endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
-            "input_ids"
-        ][-1]
-
-        ############# VLN Model #############
-        vln_model = VLNModel(
-            args, lang_encoder=None, logger=logger
-        )
-
+        raise NotImplementedError
     else:
-        args.seed = 0
-        args.dataset = 'r2r'
-        args.act_visited_nodes = False
-        args.enc_full_graph = True
-        args.graph_sprels = True
-
-        args.image_feat_size = 768
-        args.angle_feat_size = 4
-        args.obj_feat_size = 0
-
-        args.num_l_layers = 9
-        args.num_pano_layers = 2
-        args.num_x_layers = 4
-
-        args.ignoreid = -100
-        args.dropout = 0.5
-        args.expert_policy = 'spl'
-
         # we re-construct DUET Pipeline with LLMs
         vln_model = BertVLNModel(
             args, logger=logger
@@ -187,7 +165,14 @@ def main():
     random_seed(args.seed + args.rank)
 
     ############# Dataset #############
-    feat_db = ImageFeaturesDB(args.img_ft_file, args.image_feat_size)
+    feat_db = ImageFeaturesDB(str(args.img_ft_file), args.image_feat_size)
+    if args.use_object_feat:
+        obj_feat_db = ObjectFeatureDB(str(args.obj_ft_file), args.obj_feat_size) # 768
+        obj2vps = load_obj2vps(str(args.obj_ft_file.parent.parent / 'annotations/BBoxes.json'))
+        soon_obj_feat_db = SOONObjectFeatureDB(args.soon_ft_file, 2048)
+    else:
+        obj_feat_db = None
+
     r2r_dataset = SrcDataset(
         config=global_cfg.Dataset,
         training=False if args.split != 'train' else True,
@@ -195,7 +180,8 @@ def main():
         args=args,
         feat_db=feat_db,
         tokenizer=tokenizer,
-        test=False
+        test=False,
+        obj_feat_db=(obj_feat_db, obj2vps, soon_obj_feat_db) if obj_feat_db is not None else None
     )
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
         dataset=r2r_dataset,
@@ -216,6 +202,7 @@ def main():
             tokenizer=tokenizer,
             test=False,
             split=args.val_split,
+            obj_feat_db=(obj_feat_db, obj2vps, soon_obj_feat_db) if obj_feat_db is not None else None
         )
         val_r2r_dataset, val_r2r_dataloader, val_r2r_sampler = build_dataloader(
             dataset=val_r2r_dataset,
@@ -249,7 +236,6 @@ def main():
             shortest_distances=val_r2r_dataset.shortest_distances,
             shortest_paths=val_r2r_dataset.shortest_paths,
         )
-
 
     total_training_steps = (
                             len(r2r_dataset) // (args.batch_size * args.world_size)

@@ -120,6 +120,82 @@ class NavigationAgent(object):
             'cand_vpids': batch_cand_vpids,
         }
 
+    def panorama_feature_variable_object(self, obs):
+        ''' Extract precomputed features into variable. '''
+        batch_view_img_fts, batch_obj_img_fts, batch_loc_fts, batch_nav_types = [], [], [], []
+        batch_view_lens, batch_obj_lens = [], []
+        batch_cand_vpids, batch_objids = [], []
+
+        have_objects = ['obj_img_fts' in ob.keys() for ob in obs]
+        # if sum(have_objects) == len(obs):
+        #     use_obj = 'both'
+        # elif sum(have_objects) == 0:
+        #     use_obj = 'none'
+        # else:
+        #     use_obj = 'single'
+
+        for i, ob in enumerate(obs):
+            view_img_fts, view_ang_fts, nav_types, cand_vpids = [], [], [], []
+            # cand views
+            used_viewidxs = set()
+            for j, cc in enumerate(ob['candidate']):
+                view_img_fts.append(cc['feature'][:self.args.image_feat_size])
+                view_ang_fts.append(cc['feature'][self.args.image_feat_size:])
+                nav_types.append(1)
+                cand_vpids.append(cc['viewpointId'])
+                used_viewidxs.add(cc['pointId'])
+            # non cand views
+            view_img_fts.extend([x[:self.args.image_feat_size] for k, x \
+                                 in enumerate(ob['feature']) if k not in used_viewidxs])
+            view_ang_fts.extend([x[self.args.image_feat_size:] for k, x \
+                                 in enumerate(ob['feature']) if k not in used_viewidxs])
+            nav_types.extend([0] * (36 - len(used_viewidxs)))
+            # combine cand views and noncand views
+            view_img_fts = np.stack(view_img_fts, 0)  # (n_views, dim_ft)
+            view_ang_fts = np.stack(view_ang_fts, 0)
+            view_box_fts = np.array([[1, 1, 1]] * len(view_img_fts)).astype(np.float32)
+            view_loc_fts = np.concatenate([view_ang_fts, view_box_fts], 1)
+
+            batch_view_img_fts.append(torch.from_numpy(view_img_fts))
+
+            batch_cand_vpids.append(cand_vpids)
+            batch_view_lens.append(len(view_img_fts))
+
+            if have_objects[i]:
+                # object
+                obj_loc_fts = np.concatenate([ob['obj_ang_fts'], ob['obj_box_fts']], 1)
+                nav_types.extend([2] * len(obj_loc_fts))
+                batch_obj_img_fts.append(torch.from_numpy(ob['obj_img_fts']))
+                batch_objids.append(ob['obj_ids'])
+                batch_obj_lens.append(len(ob['obj_img_fts']))
+                batch_loc_fts.append(torch.from_numpy(np.concatenate([view_loc_fts, obj_loc_fts], 0)))
+            else:
+                # pad-object
+                obj_loc_fts = np.zeros((1,7), dtype=view_img_fts.dtype)
+                nav_types.extend([2] * len(obj_loc_fts))
+                batch_obj_img_fts.append(torch.zeros((1, 2048), dtype=batch_view_img_fts[0].dtype))
+                batch_objids.append(np.array(['0'],dtype=object))
+                batch_obj_lens.append(1)
+                batch_loc_fts.append(torch.from_numpy(np.concatenate([view_loc_fts, obj_loc_fts], 0)))
+
+            batch_nav_types.append(torch.LongTensor(nav_types))
+
+        # pad features to max_len
+        batch_view_img_fts = pad_tensors(batch_view_img_fts).cuda()
+        batch_loc_fts = pad_tensors(batch_loc_fts).cuda()
+        batch_nav_types = pad_sequence(batch_nav_types, batch_first=True, padding_value=0).cuda()
+        batch_view_lens = torch.LongTensor(batch_view_lens).cuda()
+
+        # object
+        batch_obj_img_fts = pad_tensors(batch_obj_img_fts).cuda()
+        batch_obj_lens = torch.LongTensor(batch_obj_lens).cuda()
+        return {
+            'view_img_fts': batch_view_img_fts, 'obj_img_fts': batch_obj_img_fts,
+            'loc_fts': batch_loc_fts, 'nav_types': batch_nav_types,
+            'view_lens': batch_view_lens, 'obj_lens': batch_obj_lens,
+            'cand_vpids': batch_cand_vpids, 'obj_ids': batch_objids,
+        }
+
     def get_pos_fts(self, cnt_vp, cand_vps, cur_heading, cur_elevation, angle_feat_size=4):
         # dim=7 (sin(heading), cos(heading), sin(elevation), cos(elevation),
         #  line_dist, shortest_dist, shortest_step)
@@ -134,7 +210,6 @@ class NavigationAgent(object):
         rel_ang_fts = get_angle_fts(rel_angles[:, 0], rel_angles[:, 1], angle_feat_size)
         return rel_ang_fts
 
-
     def nav_vp_variable(self, obs, start_pos, pano_embeds, cand_vpids, view_lens, nav_types):
         batch_size = len(obs)
 
@@ -146,7 +221,7 @@ class NavigationAgent(object):
         batch_vp_pos_fts = []
         for i in range(len(obs)):
             cur_cand_pos_fts = self.get_pos_fts(
-                obs[i]['position'], [cc['position']for cc in obs[i]['candidate']],
+                obs[i]['position'], [cc['position'] for cc in obs[i]['candidate']],
                 obs[i]['heading'], obs[i]['elevation']
             )
             cur_start_pos_fts = self.get_pos_fts(
@@ -171,6 +246,43 @@ class NavigationAgent(object):
             'vp_cand_vpids': [[None]+x for x in cand_vpids],
         }
 
+    def nav_vp_variable_object(self, obs, start_pos, pano_embeds, cand_vpids, view_lens, obj_lens, nav_types):
+        batch_size = len(obs)
+
+        # add [stop] token
+        vp_img_embeds = torch.cat(
+            [torch.zeros_like(pano_embeds[:, :1]), pano_embeds], 1
+        )
+
+        batch_vp_pos_fts = []
+        for i in range(len(obs)):
+            cur_cand_pos_fts = self.get_pos_fts(
+                obs[i]['position'], [cc['position'] for cc in obs[i]['candidate']],
+                obs[i]['heading'], obs[i]['elevation']
+            )
+            cur_start_pos_fts = self.get_pos_fts(
+                obs[i]['position'], [start_pos[i]],
+                obs[i]['heading'], obs[i]['elevation']
+            )
+            # add [stop] token at beginning
+            vp_pos_fts = np.zeros((vp_img_embeds.size(1), 8), dtype=np.float32)
+            vp_pos_fts[:, :4] = cur_start_pos_fts
+            vp_pos_fts[1:len(cur_cand_pos_fts)+1, 4:] = cur_cand_pos_fts
+            batch_vp_pos_fts.append(torch.from_numpy(vp_pos_fts))
+
+        batch_vp_pos_fts = pad_tensors(batch_vp_pos_fts).cuda()
+
+        vp_nav_masks = torch.cat([torch.ones(batch_size, 1).bool().cuda(), nav_types == 1], 1)
+        vp_obj_masks = torch.cat([torch.zeros(batch_size, 1).bool().cuda(), nav_types == 2], 1)
+
+        return {
+            'vp_img_embeds': vp_img_embeds,
+            'vp_pos_fts': batch_vp_pos_fts,
+            'vp_masks': gen_seq_masks(view_lens+obj_lens+1),
+            'vp_nav_masks': vp_nav_masks,
+            'vp_obj_masks': vp_obj_masks,
+            'vp_cand_vpids': [[None]+x for x in cand_vpids],
+        }
 
     def teacher_action_r4r(
         self, obs, vpids, ended, visited_masks=None, imitation_learning=False, t=None, traj=None
@@ -193,6 +305,7 @@ class NavigationAgent(object):
                                 a[i] = j
                                 break
                 else:
+                    ### SOON, REVERIE:
                     if ob['viewpoint'] == ob['gt_path'][-1]:
                         a[i] = 0    # Stop if arrived
                     else:
@@ -202,12 +315,13 @@ class NavigationAgent(object):
                         for j, vpid in enumerate(vpids[i]):
                             if j > 0 and ((visited_masks is None) or (not visited_masks[i][j])):
                                 if self.args.expert_policy == 'ndtw':
-                                    dist = - cal_dtw(
-                                        self.shortest_distances[scan],
-                                        sum(traj[i]['path'], []) + self.shortest_paths[scan][ob['viewpoint']][vpid][1:],
-                                        ob['gt_path'],
-                                        threshold=3.0
-                                    )['nDTW']
+                                    pass
+                                    # dist = - cal_dtw(
+                                    #     self.shortest_distances[scan],
+                                    #     sum(traj[i]['path'], []) + self.shortest_paths[scan][ob['viewpoint']][vpid][1:],
+                                    #     ob['gt_path'],
+                                    #     threshold=3.0
+                                    # )['nDTW']
                                 elif self.args.expert_policy == 'spl':
 
                                     dist = self.shortest_distances[scan][vpid][ob['gt_path'][-1]] \
@@ -265,7 +379,6 @@ def vln_train_one_epoch(
     total_training_steps = num_batches_per_epoch * args.num_epochs
 
     pbar = tqdm(
-        # enumerate(r2r_dataloader),
         range(len(r2r_dataloader)),
         disable=args.rank!=0,
         total=total_training_steps,
@@ -327,6 +440,7 @@ def vln_train_one_epoch(
             iter_loss += sample_ml_loss
             loss_metric.accumulate(sample_ml_loss.item())
 
+        # @note: backward in the rollout function, every step
         # iter_loss.backward()
 
         if args.enable_language_model:
@@ -359,6 +473,14 @@ def rollout(
 ):
     obs = batch_dict['observations']
     envs = batch_dict['env']
+    data_type = batch_dict['data_type']
+
+    if 'cvdn' in data_type:
+        max_action_len = 30
+    elif 'cvdn' not in data_type and 'soon' in data_type:
+        max_action_len = 20
+    else:
+        max_action_len = args.max_action_len # 15
 
     nav_agent.update_scanvp_cands(obs)
     batch_size = len(obs)
@@ -390,18 +512,18 @@ def rollout(
     cnt_loss = 0.
     flag = False
 
-    for t in range(args.max_action_len):
+    for t in range(max_action_len):
 
         if isinstance(vln_model.vln_bert, torch.nn.parallel.DistributedDataParallel):
             # multi-gpu
-            if ended.all() or t == args.max_action_len - 1:
+            if ended.all() or t == max_action_len - 1:
                 flag = True
                 context = nullcontext
             else:
                 context = vln_model.vln_bert.no_sync
         else:
             # single-gpu
-            if ended.all() or t == args.max_action_len - 1:
+            if ended.all() or t == max_action_len - 1:
                 break
                 context = nullcontext
             else:
@@ -409,16 +531,24 @@ def rollout(
 
         with context():
 
-            pano_inputs = nav_agent.panorama_feature_variable(obs)
+            # pano_inputs = nav_agent.panorama_feature_variable(obs)
+            pano_inputs = nav_agent.panorama_feature_variable_object(obs)
 
             pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)
 
             # navigation policy
+            # nav_inputs = \
+            #     nav_agent.nav_vp_variable(
+            #         obs, start_pos, pano_embeds, pano_inputs['cand_vpids'],
+            #         pano_inputs['view_lens'], pano_inputs['nav_types'],
+            #     )
             nav_inputs = \
-                nav_agent.nav_vp_variable(
+                nav_agent.nav_vp_variable_object(
                     obs, start_pos, pano_embeds, pano_inputs['cand_vpids'],
-                    pano_inputs['view_lens'], pano_inputs['nav_types'],
+                    pano_inputs['view_lens'], pano_inputs['obj_lens'],
+                    pano_inputs['nav_types'],
                 )
+
             nav_inputs['instruction'] = instruction
             nav_inputs['history'] = history
             nav_inputs['hist_vis'] = hist_vis
@@ -438,9 +568,11 @@ def rollout(
                         visited_masks=None,
                         imitation_learning=(feedback == 'teacher'), t=t, traj=traj
                     )
+                ############# Single-Step Loss #############
                 cnt_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
                 ml_loss += cnt_loss.detach()
 
+                ########### Single-Step Backward ###########
                 if not is_val:
                     cnt_loss.backward()
                 cnt_loss = 0.
@@ -484,7 +616,7 @@ def rollout(
             # Prepare environment action
             cpu_a_t = []
             for i in range(batch_size):
-                if a_t_stop[i] or ended[i] or (t == args.max_action_len - 1):
+                if a_t_stop[i] or ended[i] or (t == max_action_len - 1):
                     cpu_a_t.append(None)
                     just_ended[i] = True
                 else:
@@ -499,7 +631,7 @@ def rollout(
                 obs.append(
                     r2r_dataloader.dataset.get_obs(
                         items=[batch_dict['item'][b_i]],
-                        env=envs[b_i]
+                        env=envs[b_i], data_type=data_type[b_i]
                     )[0]
                 )
             nav_agent.update_scanvp_cands(obs)
@@ -606,7 +738,9 @@ def vln_val_one_epoch(
                 if pdata['instr_id'].split('_')[0] == prefix:
                     one_preds.append(pdata)
 
-            score_summary, _ = r2r_dataloader.dataset.eval_metrics(one_preds, logger)
+            score_summary, _ = r2r_dataloader.dataset.eval_metrics(
+                one_preds, logger=logger, data_type=prefix
+            )
 
             if prefix == 'r2r':
                 useful_score_summary = score_summary
