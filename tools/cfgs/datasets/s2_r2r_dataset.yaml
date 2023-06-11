@@ -8,16 +8,22 @@ Dataset:
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['R2R', 'SOON', 'REVERIE', 'CVDN'] # 'R2R', 'SOON', 'REVERIE', '--EQA', "CVDN"
-  
+  SOURCE: ['R2R'] # 'R2R', 'SOON', 'REVERIE', 'CVDN'
   SOON:
-    DIR: "data/SOON/annotations/iccv21_new_released" # train.json
+    DIR: "data/SOON/annotations/duet" # train.json
     SPLIT: {
-      "train": "train.json",
-      "val_seen": "val_unseen_house.json",
-      "val_unseen": "val_unseen_instrs.json",
-      "test": "test_v2.json"
+      "train": "train_enc_pseudo_obj_label.jsonl",
+      "val_seen": "val_unseen_instrs_enc_pseudo_obj_label.jsonl",
+      "val_unseen": "val_unseen_house_enc_pseudo_obj_label.jsonl",
+      "test": "None"
     }
+#    DIR: "data/SOON/annotations/iccv21_new_released" # train.json
+#    SPLIT: {
+#      "train": "train.json",
+#      "val_seen": "val_unseen_house.json",
+#      "val_unseen": "val_unseen_instrs.json",
+#      "test": "test_v2.json"
+#    }
 
   FR2R:
     DIR: "data/Fine-Grained-R2R/data" # FGR2R_train.json
@@ -52,10 +58,10 @@ Dataset:
   CVDN:
     DIR: "data/CVDN"
     SPLIT: {
-      "train": "train.json",
-      "val_seen": "val_seen.json",
-      "val_unseen": "val_unseen.json",
-      "test": "test_cleaned.json"
+      "train": "train_enc.json",
+      "val_seen": "val_seen_enc.json",
+      "val_unseen": "val_unseen_enc.json",
+      "test": "test_enc.json"
     }
 
   Img_Features_File_Map: {
