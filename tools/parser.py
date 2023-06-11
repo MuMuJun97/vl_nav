@@ -23,7 +23,7 @@ def read_args():
     parser.add_argument('--feat_dropout', type=float, default=0.4) # image feature dropout
     parser.add_argument('--fusion', type=str, default='dynamic')  # ['local', 'global', 'dynamic']
     parser.add_argument('--lr', type=float, default=1e-5)  # single-gpu, 16 batch size, lr=1e-5
-    parser.add_argument('--use_object_feat', type=bool, default=True) # REVERIE use object features
+    parser.add_argument('--use_object_feat', type=bool, default=False) # REVERIE use object features
 
     ############# Tasks #############
     # R2R downstream tasks: multi-step inference.

@@ -410,11 +410,14 @@ class SrcDataset(torch_data.Dataset):
 
             # if (data_type == 'soon' or data_type == 'reverie') and self.soon_obj_db is not None:
             #     # objects
-            obj_img_fts, obj_ang_fts, obj_box_fts, obj_directions, obj_ids = self.soon_obj_db.get_object_feature(
-                state.scanId, state.location.viewpointId,
-                state.heading, state.elevation, self.angle_feat_size,
-                max_objects=100
-            )
+            if self.soon_obj_db is not None:
+                obj_img_fts, obj_ang_fts, obj_box_fts, obj_directions, obj_ids = self.soon_obj_db.get_object_feature(
+                    state.scanId, state.location.viewpointId,
+                    state.heading, state.elevation, self.angle_feat_size,
+                    max_objects=100
+                )
+            else:
+                obj_img_fts, obj_ang_fts, obj_box_fts, obj_directions, obj_ids = [None]*5
 
             ob = {
                 'instr_id': item['instr_id'],
@@ -534,6 +537,11 @@ class SrcDataset(torch_data.Dataset):
         env = EnvBatch(connectivity_dir=self.connectivity_dir, batch_size=1)
         env.newEpisodes(scanIds, viewpointIds, headings)
         observations = self.get_obs(items=[item], env=env, data_type=data_type)[0]
+
+        # check length of instruction
+        max_len = 128
+        if len(item['instruction'].split()) > max_len:
+            item['instruction'] = " ".join(item['instruction'].split()[:max_len])
 
         data_dict = {
             'sample_idx': index,

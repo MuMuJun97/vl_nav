@@ -120,7 +120,7 @@ class NavigationAgent(object):
         for i, gmap in enumerate(gmaps):
             visited_vpids, unvisited_vpids = [], []
             for k in gmap.node_positions.keys():
-                if self.args.act_visited_nodes:
+                if self.args.act_visited_nodes: # False
                     if k == obs[i]['viewpoint']:
                         visited_vpids.append(k)
                     else:
@@ -131,7 +131,7 @@ class NavigationAgent(object):
                     else:
                         unvisited_vpids.append(k)
             batch_no_vp_left.append(len(unvisited_vpids) == 0)
-            if self.args.enc_full_graph:
+            if self.args.enc_full_graph: # True
                 gmap_vpids = [None] + visited_vpids + unvisited_vpids
                 gmap_visited_masks = [0] + [1] * len(visited_vpids) + [0] * len(unvisited_vpids)
             else:
@@ -397,7 +397,7 @@ def rollout(
         feedback,
         train_ml,
         train_rl,
-        nav_agent,
+        nav_agent: NavigationAgent,
         vln_model: BertVLNModel,
         entropy_metric=None,
 ):
