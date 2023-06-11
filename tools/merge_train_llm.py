@@ -695,10 +695,14 @@ def rollout(
             # Imitation Learning
             if train_ml is not None or feedback == 'gt':
                 # Supervised training
+                if 'cvdn' in data_type:
+                    imitation_learning = False
+                else:
+                    imitation_learning = feedback == 'teacher'
                 nav_targets = nav_agent.teacher_action_r4r(
                     obs, nav_vpids, ended,
                     visited_masks=nav_inputs['gmap_visited_masks'],
-                    imitation_learning=(feedback == 'teacher'), t=t, traj=traj
+                    imitation_learning=imitation_learning, t=t, traj=traj
                 )
                 ############# Single-Step Loss #############
                 cnt_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size

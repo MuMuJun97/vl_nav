@@ -491,10 +491,16 @@ class SrcDataset(torch_data.Dataset):
         return obs
 
     def __getitem__(self, index):
-        item = self.alldata[index]
+        item = copy.deepcopy(self.alldata[index])
         data_type = item['data_type']
         scan = item['scan']
         instr_id = item['instr_id']
+
+        # check length of instruction
+        max_len = 128
+        if len(item['instruction'].split()) > max_len:
+            self.alldata[index]['instruction'] = " ".join(item['instruction'].split()[:max_len])
+            item['instruction'] = " ".join(item['instruction'].split()[:max_len])
 
         if data_type == 'reverie':
             start_vp = item['path'][0]
@@ -537,11 +543,6 @@ class SrcDataset(torch_data.Dataset):
         env = EnvBatch(connectivity_dir=self.connectivity_dir, batch_size=1)
         env.newEpisodes(scanIds, viewpointIds, headings)
         observations = self.get_obs(items=[item], env=env, data_type=data_type)[0]
-
-        # check length of instruction
-        max_len = 128
-        if len(item['instruction'].split()) > max_len:
-            item['instruction'] = " ".join(item['instruction'].split()[:max_len])
 
         data_dict = {
             'sample_idx': index,

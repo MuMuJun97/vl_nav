@@ -58,9 +58,9 @@ def llama_model_in_debug_model(lang_encoder_path):
     from pathlib import Path
     with open(lang_encoder_path, "rb") as f:
         config = pickle.load(f)
-        config.intermediate_size = 1024
-        config.num_hidden_layers = 2
-        config.hidden_size = 1024
+        config.intermediate_size = 128
+        config.num_hidden_layers = 1
+        config.hidden_size = 128
     model_args = ()
     model_kwargs = {}
     with ContextManagers(init_contexts):
@@ -632,18 +632,18 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
 
         self.img_embeddings = ImageEmbeddings(config)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
+
+        self.lang_model = LangModel(config)
+        self.hidden_size = self.lang_model.hidden_size
+        self.model_type = self.lang_model.model_type
+
         self.local_encoder = LocalVPEncoder(config)
         self.global_encoder = GlobalMapEncoder(config)
         self.sap_fuse_linear = ClsPrediction(config.hidden_size, input_size=config.hidden_size * 2)
 
         self.fuse_encoder = FuseEncoder(config.hidden_size)
 
-        self.lang_model = LangModel(config)
-
-        self.out_head = ClsPrediction(self.lang_model.hidden_size)
-
-        self.hidden_size = self.lang_model.hidden_size
-        self.model_type = self.lang_model.model_type
+        self.out_head = ClsPrediction(self.lang_model.hidden_size).to(self.lang_model.model_type)
 
         self.instruction = None
         self.history = None

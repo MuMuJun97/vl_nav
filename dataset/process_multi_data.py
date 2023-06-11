@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import ast
 import jsonlines
-debug = True
+debug = False
 
 
 def load_r2r_data(anno_file, max_instr_len=200):

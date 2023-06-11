@@ -259,8 +259,7 @@ def main():
             nav_agent=nav_agent,
             logger=logger
         )
-        # if args.val:
-        if False:
+        if args.val:
             ########### validation ###########
             vln_val_one_epoch(
                 args=args,
