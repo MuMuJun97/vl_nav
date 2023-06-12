@@ -168,7 +168,7 @@ class SrcDataset(torch_data.Dataset):
             self.obj_db = None
             self.obj2vps = None
             self.soon_obj_db = None
-        self.multi_endpoints = True  # only for REVERIE dataset
+        self.multi_endpoints = False  # only for REVERIE dataset
         self.max_objects = 20
 
         _root_dir = Path(args.source_dir)
@@ -270,11 +270,9 @@ class SrcDataset(torch_data.Dataset):
         return gt_trajs
 
     def get_gt_cvdn(self, data):
-        gt_trajs = {
-            x['instr_id']: (x['scan'], x['end_panos'])
-            for x in data
-            if 'end_panos' in x
-        }
+        gt_trajs = {}
+        for x in data:
+            gt_trajs[x['instr_id']] = x
         return gt_trajs
 
     def get_gt_trajs_reverie(self, data):
@@ -436,51 +434,51 @@ class SrcDataset(torch_data.Dataset):
                 'path_id': item['path_id'],
             }
 
-            if data_type == 'reverie':
-                ob.update({
-                    ### object grounding ###
-                    'obj_img_fts': obj_img_fts, # [1, 2048]
-                    'obj_ang_fts': obj_ang_fts, # [1,4]
-                    'obj_box_fts': obj_box_fts, # [1,3]
-                    'obj_ids': obj_ids, # [1,]
-                    'gt_end_vps': item.get('end_vps', []), # [multi vps]
-                    # 'gt_obj_id': item['objId'], #
-                })
-
-                ### RL reward. The negative distance between the state and the final state
-                ### There are multiple gt end viewpoints on REVERIE.
-                # if ob['instr_id'] in self.gt_trajs:
-                #     gt_objid = self.gt_trajs[ob['instr_id']][-1]
-                #     min_dist = np.inf
-                #     for vp in self.obj2vps['%s_%s' % (ob['scan'], str(gt_objid))]:
-                #         try:
-                #             min_dist = min(min_dist, self.shortest_distances[ob['scan']][ob['viewpoint']][vp])
-                #         except:
-                #             print(ob['scan'], ob['viewpoint'], vp)
-                #             exit(0)
-                #     ob['distance'] = min_dist
-                # else:
-                #     ob['distance'] = 0
-
-            elif data_type == 'soon':
-                ob.update({
-                    ### object grounding ###
-                    'obj_img_fts': obj_img_fts, # [n, 2048]
-                    'obj_ang_fts': obj_ang_fts, # [n,4]
-                    'obj_box_fts': obj_box_fts, # [n,3]
-                    'obj_ids': obj_ids, # [n,]
-                    'gt_end_vps': item.get('end_image_ids', []), # get multi-end-viewpoints
-                    # 'gt_obj_id': item['objId'], #
-                })
-
-            else:
-                ob.update({
-                    ### object grounding ###
-                    'obj_img_fts': obj_img_fts,  # [1, 2048]
-                    'obj_ang_fts': obj_ang_fts,  # [1,4]
-                    'obj_box_fts': obj_box_fts,  # [1,3]
-                    'obj_ids': obj_ids,  # [1,]
-                })
+            # if data_type == 'reverie':
+            #     ob.update({
+            #         ### object grounding ###
+            #         'obj_img_fts': obj_img_fts, # [1, 2048]
+            #         'obj_ang_fts': obj_ang_fts, # [1,4]
+            #         'obj_box_fts': obj_box_fts, # [1,3]
+            #         'obj_ids': obj_ids, # [1,]
+            #         'gt_end_vps': item.get('end_vps', []), # [multi vps]
+            #         # 'gt_obj_id': item['objId'], #
+            #     })
+            #
+            #     ### RL reward. The negative distance between the state and the final state
+            #     ### There are multiple gt end viewpoints on REVERIE.
+            #     # if ob['instr_id'] in self.gt_trajs:
+            #     #     gt_objid = self.gt_trajs[ob['instr_id']][-1]
+            #     #     min_dist = np.inf
+            #     #     for vp in self.obj2vps['%s_%s' % (ob['scan'], str(gt_objid))]:
+            #     #         try:
+            #     #             min_dist = min(min_dist, self.shortest_distances[ob['scan']][ob['viewpoint']][vp])
+            #     #         except:
+            #     #             print(ob['scan'], ob['viewpoint'], vp)
+            #     #             exit(0)
+            #     #     ob['distance'] = min_dist
+            #     # else:
+            #     #     ob['distance'] = 0
+            #
+            # elif data_type == 'soon':
+            #     ob.update({
+            #         ### object grounding ###
+            #         'obj_img_fts': obj_img_fts, # [n, 2048]
+            #         'obj_ang_fts': obj_ang_fts, # [n,4]
+            #         'obj_box_fts': obj_box_fts, # [n,3]
+            #         'obj_ids': obj_ids, # [n,]
+            #         'gt_end_vps': item.get('end_image_ids', []), # get multi-end-viewpoints
+            #         # 'gt_obj_id': item['objId'], #
+            #     })
+            #
+            # else:
+            #     ob.update({
+            #         ### object grounding ###
+            #         'obj_img_fts': obj_img_fts,  # [1, 2048]
+            #         'obj_ang_fts': obj_ang_fts,  # [1,4]
+            #         'obj_box_fts': obj_box_fts,  # [1,3]
+            #         'obj_ids': obj_ids,  # [1,]
+            #     })
 
             # if ob['instr_id'] in self.gt_trajs:
             #     ob['distance'] = self.shortest_distances[ob['scan']][ob['viewpoint']][item['path'][-1]]
@@ -505,10 +503,10 @@ class SrcDataset(torch_data.Dataset):
         if data_type == 'reverie':
             start_vp = item['path'][0]
             end_vp = item['path'][-1]
-            if self.multi_endpoints:
-                end_vp = item['end_vps'][np.random.randint(len(item['end_vps']))]
-                item = copy.deepcopy(self.alldata[index])
-                item['path'] = self.shortest_paths[item['scan']][start_vp][end_vp]
+            # if self.multi_endpoints:
+            #     end_vp = item['end_vps'][np.random.randint(len(item['end_vps']))]
+            #     item = copy.deepcopy(self.alldata[index])
+            #     item['path'] = self.shortest_paths[item['scan']][start_vp][end_vp]
 
         elif data_type == 'soon':
             if self.training:
@@ -516,25 +514,16 @@ class SrcDataset(torch_data.Dataset):
                 start_vp = item['path'][0]
                 end_vp = item['path'][-1]
 
-                if self.multi_endpoints:
-                    end_vp = item['end_image_ids'][np.random.randint(len(item['end_image_ids']))]
-                    item = copy.deepcopy(self.alldata[index])
-                    item['path'] = self.shortest_paths[item['scan']][start_vp][end_vp]
+                # if self.multi_endpoints:
+                #     end_vp = item['end_image_ids'][np.random.randint(len(item['end_image_ids']))]
+                #     item = copy.deepcopy(self.alldata[index])
+                #     item['path'] = self.shortest_paths[item['scan']][start_vp][end_vp]
             else:
                 item['heading'] = 1.52
             item['elevation'] = 0
 
         elif data_type == 'cvdn':
-            if 'end_panos' in item:
-                use_player_path = np.random.rand() > 0.5
-                if use_player_path:
-                    item['path'] = item['nav_steps'][item['nav_idx']:]
-                else:
-                    end_pano = np.random.choice(item['end_panos'])
-                    item['path'] = self.shortest_paths[scan][item['start_pano']][end_pano]
-            else:
-                item['path'] = [item['start_pano']]
-            item['heading'] = item['start_heading']
+            item['heading'] = item['start_pano']['heading']
 
         scanIds = [scan]
         viewpointIds = [item['path'][0]]
@@ -647,22 +636,71 @@ class SrcDataset(torch_data.Dataset):
 
         return scores
 
-    def eval_cvdn(self, scan, path, end_panos):
-        scores = {}
-
-        start_pano = path[0]
-        end_panos = set(end_panos)
+    def eval_cvdn(self, scan, path, gt_item):
         shortest_distances = self.shortest_distances[scan]
 
+        start = gt_item['path'][0]
+        assert start == path[0], 'Result trajectories should include the start position'
+        goal = gt_item['path'][-1]
+        planner_goal = gt_item['planner_path'][-1]  # for calculating oracle planner success (e.g., passed over desc goal?)
+        final_position = path[0]  # 预测
+        nearest_position = self.get_nearest(shortest_distances, goal, path)
+        nearest_planner_position = self.get_nearest(shortest_distances, planner_goal, path)
+        dist_to_end_start = None
+        dist_to_end_end = None
+        for end_pano in gt_item['end_panos']:
+            d = shortest_distances[start][end_pano]
+            if dist_to_end_start is None or d < dist_to_end_start:
+                dist_to_end_start = d
+            d = shortest_distances[final_position][end_pano]
+            if dist_to_end_end is None or d < dist_to_end_end:
+                dist_to_end_end = d
+        scores = defaultdict(list)
+        scores['nav_errors'].append(shortest_distances[final_position][goal])
+        scores['oracle_errors'].append(shortest_distances[nearest_position][goal])
+        scores['oracle_plan_errors'].append(shortest_distances[nearest_planner_position][planner_goal])
+        scores['dist_to_end_reductions'].append(dist_to_end_start - dist_to_end_end)
+        distance = 0  # Work out the length of the path in meters
+        prev = path[0]
+        for curr in path[1:]:
+            if prev != curr:
+                try:
+                    self.graphs[gt_item['scan']][prev][curr]
+                except KeyError as err:
+                    print(err)
+            distance += shortest_distances[prev][curr]
+            prev = curr
+        scores['trajectory_lengths'].append(distance)
+        scores['shortest_path_lengths'].append(shortest_distances[start][goal])
+        return scores
+
+    def eval_dis_item(self, scan, pred_path, gt_path):
+        scores = {}
+
+        shortest_distances = self.shortest_distances[scan]
+
+        path = sum(pred_path, [])
+        assert gt_path[0] == path[0], 'Result trajectories should include the start position'
+
+        nearest_position = self.get_nearest(shortest_distances, gt_path[-1], path)
+
+        scores['nav_error'] = shortest_distances[path[-1]][gt_path[-1]]
+        scores['oracle_error'] = shortest_distances[nearest_position][gt_path[-1]]
+
+        scores['action_steps'] = len(pred_path) - 1
         scores['trajectory_steps'] = len(path) - 1
         scores['trajectory_lengths'] = np.sum([shortest_distances[a][b] for a, b in zip(path[:-1], path[1:])])
-        gt_lengths = np.min([shortest_distances[start_pano][end_pano] for end_pano in end_panos])
 
-        # navigation: success is to arrive to a viewpoint in end_panos
-        scores['success'] = float(path[-1] in end_panos)
-        scores['oracle_success'] = float(any(x in end_panos for x in path))
+        gt_lengths = np.sum([shortest_distances[a][b] for a, b in zip(gt_path[:-1], gt_path[1:])])
+
+        scores['success'] = float(scores['nav_error'] < ERROR_MARGIN)
         scores['spl'] = scores['success'] * gt_lengths / max(scores['trajectory_lengths'], gt_lengths, 0.01)
-        scores['gp'] = gt_lengths - np.min([shortest_distances[path[-1]][end_pano] for end_pano in end_panos])
+        scores['oracle_success'] = float(scores['oracle_error'] < ERROR_MARGIN)
+
+        scores.update(
+            cal_dtw(shortest_distances, path, gt_path, scores['success'], ERROR_MARGIN)
+        )
+        scores['CLS'] = cal_cls(shortest_distances, path, gt_path, ERROR_MARGIN)
 
         return scores
 
@@ -680,52 +718,53 @@ class SrcDataset(torch_data.Dataset):
             if instr_id not in self.gt_trajs.keys():
                 print(instr_id)
                 raise NotImplementedError
-            if data_type == 'reverie':
-                scan, gt_traj, gt_objid = self.gt_trajs[instr_id]
-                traj_scores = self.eval_item(scan, traj, gt_traj, gt_objid=gt_objid)
+            # if data_type == 'reverie':
+            #     scan, gt_traj, gt_objid = self.gt_trajs[instr_id]
+            #     traj_scores = self.eval_item(scan, traj, gt_traj, gt_objid=gt_objid)
+            # elif data_type == 'soon':
+            #     gt_item = self.gt_trajs[instr_id]
+            #     traj_scores = self.eval_item(gt_item['scan'], traj, gt_path=gt_item['path'], is_soon=True, gt_item=gt_item)
+            # elif data_type == 'cvdn':
+            #     traj = sum(item['trajectory'], [])
+            #     scan, end_panos = self.gt_trajs[instr_id]
+            #     traj_scores = self.eval_cvdn(scan, traj, end_panos)
+            # else:
+            #     scan, gt_traj = self.gt_trajs[instr_id]
+            #     traj_scores = self.eval_item(scan, traj, gt_traj)
+
+            if data_type == 'cvdn':
+                traj = sum(item['trajectory'], [])
+                gt_item = self.gt_trajs[instr_id]
+                traj_scores = self.eval_cvdn(gt_item['scan'], traj, gt_item)
             elif data_type == 'soon':
                 gt_item = self.gt_trajs[instr_id]
-                traj_scores = self.eval_item(gt_item['scan'], traj, gt_path=gt_item['path'], is_soon=True, gt_item=gt_item)
-            elif data_type == 'cvdn':
-                traj = sum(item['trajectory'], [])
-                scan, end_panos = self.gt_trajs[instr_id]
-                traj_scores = self.eval_cvdn(scan, traj, end_panos)
+                traj_scores = self.eval_dis_item(gt_item['scan'], traj, gt_path=gt_item['path'])
+            elif data_type == 'reverie':
+                scan, gt_traj, gt_objid = self.gt_trajs[instr_id]
+                traj_scores = self.eval_dis_item(scan, traj, gt_traj)
             else:
                 scan, gt_traj = self.gt_trajs[instr_id]
-                traj_scores = self.eval_item(scan, traj, gt_traj)
+                traj_scores = self.eval_dis_item(scan, traj, gt_traj)
 
             for k, v in traj_scores.items():
                 metrics[k].append(v)
             metrics['instr_id'].append(instr_id)
 
-        if data_type == 'reverie':
+        if data_type == 'cvdn':
+            num_successes = len([i for i in traj_scores['nav_errors'] if i < ERROR_MARGIN])
+            oracle_successes = len([i for i in traj_scores['oracle_errors'] if i < ERROR_MARGIN])
+            oracle_plan_successes = len([i for i in traj_scores['oracle_plan_errors'] if i < ERROR_MARGIN])
+
             avg_metrics = {
-                'action_steps': np.mean(metrics['action_steps']),
-                'steps': np.mean(metrics['trajectory_steps']),
-                'lengths': np.mean(metrics['trajectory_lengths']),
-                'sr': np.mean(metrics['success']) * 100,
-                'oracle_sr': np.mean(metrics['oracle_success']) * 100,
-                'spl': np.mean(metrics['spl']) * 100,
-            }
-        elif data_type == 'soon':
-            avg_metrics = {
-                'action_steps': np.mean(metrics['action_steps']),
-                'steps': np.mean(metrics['trajectory_steps']),
-                'lengths': np.mean(metrics['trajectory_lengths']),
-                'nav_error': np.mean(metrics['nav_error']),
-                'oracle_error': np.mean(metrics['oracle_error']),
-                'sr': np.mean(metrics['success']) * 100,
-                'oracle_sr': np.mean(metrics['oracle_success']) * 100,
-                'spl': np.mean(metrics['spl']) * 100,
-            }
-        elif data_type == 'cvdn':
-            avg_metrics = {
-                'steps': np.mean(metrics['trajectory_steps']),
-                'lengths': np.mean(metrics['trajectory_lengths']),
-                'sr': np.mean(metrics['success']) * 100,
-                'oracle_sr': np.mean(metrics['oracle_success']) * 100,
-                'spl': np.mean(metrics['spl']) * 100,
-                'gp': np.mean(metrics['gp']),
+                'lengths': np.average(traj_scores['trajectory_lengths']),
+                'nav_error': np.average(traj_scores['nav_errors']),
+                'oracle_sr': float(oracle_successes) / float(len(traj_scores['oracle_errors'])),
+                'sr': float(num_successes) / float(len(traj_scores['nav_errors'])),
+                'spl': 0.0,
+                'oracle path_success_rate': float(oracle_plan_successes) / float(
+                    len(traj_scores['oracle_plan_errors'])),
+                'dist_to_end_reduction': sum(traj_scores['dist_to_end_reductions']) / float(
+                    len(traj_scores['dist_to_end_reductions']))
             }
         else:
             avg_metrics = {

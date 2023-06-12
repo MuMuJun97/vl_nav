@@ -138,17 +138,18 @@ def load_cvdn_raw(anno_file, path_type='trusted_path'):
     for i, item in enumerate(data):
         new_item = dict(item)
         new_item['heading'] = None # item['start_pano']['heading']
-        new_item['path'] = None
+        # new_item['path'] = None
 
         # Add 'trusted_path' to gt metadata if necessary.
-        # if path_type == 'trusted_path':
-        #     planner_goal = item['planner_path'][-1]
-        #     if planner_goal in item['player_path'][1:]:
-        #         new_item['path'] = item['player_path'][:]
-        #     else:
-        #         new_item['path'] = item['planner_path'][:]
-        # else:
-        #     raise NotImplementedError
+        if path_type == 'trusted_path':
+            planner_goal = item['planner_path'][-1]
+            # if planner_goal in item['player_path'][1:]:
+            #     new_item['path'] = item['player_path'][:]  # trust the player.
+            # else:
+            #     new_item['path'] = item['planner_path'][:]  # trust the planner.
+            new_item['path'] = item['planner_path'][:]
+        else:
+            raise NotImplementedError
 
         if len(item['dialog_history']) == 0:
             new_item['instruction'] = "The goal room contains a {target}.\n".format(target=item['target'])
@@ -170,12 +171,12 @@ def load_cvdn_raw(anno_file, path_type='trusted_path'):
             new_item['instruction'] += sentences
         if new_item['instruction'][-1] == '\n':
             new_item['instruction'] = new_item['instruction'][:-1]
-        new_item['path_id'] = item['instr_id']
+        new_item['path_id'] = item['inst_idx']
         new_item['raw_idx'] = None
         new_item['instr_encoding'] = None
         new_item['data_type'] = 'cvdn'
         new_item['sample_idx'] = sample_idx
-        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, item['instr_id'])
+        new_item['instr_id'] = 'cvdn_{}_{}'.format(sample_idx, new_item['path_id'] )
 
         new_data.append(new_item)
         sample_idx += 1

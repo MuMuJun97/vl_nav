@@ -577,7 +577,7 @@ def rollout(
     data_type = batch_dict['data_type']
 
     if 'cvdn' in data_type:
-        max_action_len = 30
+        max_action_len = 20
     elif 'cvdn' not in data_type and 'soon' in data_type:
         max_action_len = 20
     else:
@@ -772,6 +772,7 @@ def rollout(
 
             # Make action and get the new state
             nav_agent.make_equiv_action(cpu_a_t, gmaps, obs, traj=traj, env=envs)
+
             for i in range(batch_size):
                 if (not ended[i]) and just_ended[i]:
                     stop_node, stop_score = None, {'stop': -float('inf')}
@@ -779,7 +780,7 @@ def rollout(
                         if v['stop'] > stop_score['stop']:
                             stop_score = v
                             stop_node = k
-                    if stop_node is not None and obs[i]['viewpoint'] != stop_node:
+                    if stop_node is not None and obs[i]['viewpoint'] != stop_node and data_type[i] != 'cvdn':
                         traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
 
             # get new observation and update graph
@@ -802,9 +803,9 @@ def rollout(
             if flag:
                 break
 
-            # Early exit if all ended
-            if ended.all():
-                break
+            # # Early exit if all ended
+            # if ended.all():
+            #     break
 
     return ml_loss, traj
 

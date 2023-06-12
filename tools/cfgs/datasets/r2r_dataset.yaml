@@ -6,7 +6,7 @@ Dataset:
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['R2R'] # 'R2R', 'SOON', 'REVERIE', 'CVDN'
+  SOURCE: ['R2R', 'SOON', 'REVERIE', 'CVDN'] # 'R2R', 'SOON', 'REVERIE', 'CVDN'
   SOON:
     DIR: "data/SOON/annotations/duet" # train.json
     SPLIT: {
@@ -56,11 +56,17 @@ Dataset:
   CVDN:
     DIR: "data/CVDN"
     SPLIT: {
-      "train": "train_enc.json",
-      "val_seen": "val_seen_enc.json",
-      "val_unseen": "val_unseen_enc.json",
-      "test": "test_enc.json"
+      "train": "train.json",
+      "val_seen": "val_seen.json",
+      "val_unseen": "val_unseen.json",
+      "test": "test_cleaned.json"
     }
+#    SPLIT: {
+#      "train": "train_enc.json",
+#      "val_seen": "val_seen_enc.json",
+#      "val_unseen": "val_unseen_enc.json",
+#      "test": "test_enc.json"
+#    }
 
   Img_Features_File_Map: {
     # from HM3D-AutoVLN

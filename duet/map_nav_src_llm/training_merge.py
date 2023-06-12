@@ -168,10 +168,11 @@ def main():
     feat_db = ImageFeaturesDB(str(args.img_ft_file), args.image_feat_size)
     if args.use_object_feat:
         obj_feat_db = ObjectFeatureDB(str(args.obj_ft_file), args.obj_feat_size) # 768
-        obj2vps = load_obj2vps(str(args.obj_ft_file.parent.parent / 'annotations/BBoxes.json'))
         soon_obj_feat_db = SOONObjectFeatureDB(args.soon_ft_file, 2048)
     else:
         obj_feat_db = None
+        soon_obj_feat_db = None
+    obj2vps = load_obj2vps(str(args.obj_ft_file.parent.parent / 'annotations/BBoxes.json'))
 
     r2r_dataset = SrcDataset(
         config=global_cfg.Dataset,
@@ -181,7 +182,7 @@ def main():
         feat_db=feat_db,
         tokenizer=tokenizer,
         test=False,
-        obj_feat_db=(obj_feat_db, obj2vps, soon_obj_feat_db) if obj_feat_db is not None else None
+        obj_feat_db=(obj_feat_db, obj2vps, soon_obj_feat_db)
     )
     r2r_dataset, r2r_dataloader, r2r_sampler = build_dataloader(
         dataset=r2r_dataset,
@@ -202,7 +203,7 @@ def main():
             tokenizer=tokenizer,
             test=False,
             split=args.val_split,
-            obj_feat_db=(obj_feat_db, obj2vps, soon_obj_feat_db) if obj_feat_db is not None else None
+            obj_feat_db=(obj_feat_db, obj2vps, soon_obj_feat_db)
         )
         val_r2r_dataset, val_r2r_dataloader, val_r2r_sampler = build_dataloader(
             dataset=val_r2r_dataset,
