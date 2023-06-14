@@ -5,7 +5,9 @@ import numpy as np
 import math
 import json
 import torch
+import os
 import MatterSim
+from typing import List, Tuple
 import networkx as nx
 from torch.utils.data import DataLoader
 import torchvision
@@ -78,6 +80,110 @@ def get_point_angle_feature(sim, angle_feat_size, baseViewId=0):
 
 def get_all_point_angle_feature(sim, angle_feat_size):
     return [get_point_angle_feature(sim, angle_feat_size, baseViewId) for baseViewId in range(36)]
+
+
+class Metric:
+    def __init__(self, info=None, metric_names=None, log_json=None):
+        self.info = info
+        # self.metric_names = sorted(metric_names) if metric_names else []
+        self.metric_names = metric_names
+
+        self.metrics = [[None, None, None] for _ in self.metric_names]
+
+        self.stats = []
+        self.num_iters = 0
+
+        self.log_json = log_json
+
+    def update(self, values: List) -> None:
+        assert isinstance(values, list)
+
+        self.num_iters += 1
+        current_stats = []
+
+        for i in range(len(values)):
+            if values[i] is None:
+                continue
+
+            if isinstance(values[i], list) is False:
+                values[i] = [values[i]]
+
+            if self.metrics[i][0] is None:
+                self.metrics[i][0] = np.mean(values[i])
+                self.metrics[i][1] = np.mean(values[i])
+                self.metrics[i][2] = np.mean(values[i])
+            else:
+                self.metrics[i][0] = (
+                    self.metrics[i][0] * (self.num_iters - 1)
+                    + np.mean(values[i])
+                ) / self.num_iters
+
+                self.metrics[i][1] = 0.95 * self.metrics[i][
+                    1
+                ] + 0.05 * np.mean(values[i])
+
+                self.metrics[i][2] = np.mean(values[i])
+
+            self.metrics[i][0] = float(self.metrics[i][0])
+            self.metrics[i][1] = float(self.metrics[i][1])
+            self.metrics[i][2] = float(self.metrics[i][2])
+
+            current_stats.append(self.metrics[i])
+
+        self.stats.append(copy.deepcopy(current_stats))
+
+    def get_stat_string(self, mode: int = 1) -> str:
+
+        stat_string = ""
+
+        for k, v in self.info.items():
+            stat_string += "[{}:{}]".format(k, v)
+
+        stat_string += "[iters:{}]\n".format(self.num_iters)
+        for i in range(len(self.metric_names)):
+            if self.metrics[i][mode] is not None:
+                stat_string += "[{}:{:.3f}]".format(
+                    self.metric_names[i],
+                    self.metrics[i][mode],
+                )
+
+        return stat_string
+
+    def get_stats(self, mode: int = 1) -> List[float]:
+        stats = []
+        for i in range(len(self.metric_names)):
+            stats.append(self.metrics[i][mode])
+
+        return stats
+
+    def dump_log(self) -> bool:
+
+        if self.log_json is None:
+            return False
+
+        dict_to_save = {"metric_names": self.metric_names, "stats": self.stats}
+
+        with open(self.log_json, "w") as f:
+            json.dump(dict_to_save, f)
+
+        return True
+
+
+class VqaMetric(Metric):
+    def __init__(self, info=None, metric_names=None, log_json=None):
+        super().__init__(info, metric_names, log_json)
+
+    def compute_ranks(
+        self, scores: torch.Tensor, labels: torch.Tensor
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        accuracy = np.zeros(len(labels))
+        ranks = np.full(len(labels), scores.shape[1])  # [35, 35]
+
+        for i in range(scores.shape[0]): # gt() > 函数.
+            ranks[i] = scores[i].gt(scores[i][labels[i]]).sum() + 1
+            if ranks[i] == 1:
+                accuracy[i] = 1
+        return accuracy, ranks
 
 
 class EnvBatch(object):
@@ -179,9 +285,6 @@ class SrcDataset(torch_data.Dataset):
         # multi dataset
         msg = self._load_multi_data(config, _root_dir)
 
-        if self.training:
-            random.shuffle(self.alldata)
-
         self.buffered_state_dict = {}
 
         # simulator
@@ -191,6 +294,24 @@ class SrcDataset(torch_data.Dataset):
         self.angle_feature = get_all_point_angle_feature(self.sim, self.angle_feat_size)
 
         self._load_nav_graphs()
+
+        if 'cvdn' in self.data.keys():
+            for idx, item in enumerate(self.data['cvdn']):
+                if item['path'][-1] not in item['end_panos']:
+                    dist_start_to_end = None
+                    goal_vp = None
+                    for end_vp in item['end_panos']:
+                        d = self.shortest_paths[item['scan']][item['start_pano']['pano']][end_vp]
+                        if dist_start_to_end is None or len(d) < len(dist_start_to_end):
+                            dist_start_to_end = d
+                            goal_vp = end_vp
+                    item['path'] = self.shortest_paths[item['scan']][item['start_pano']['pano']][goal_vp]
+            self.alldata = []
+            for key, value in self.data.items():
+                self.alldata += value
+            del self.data
+            if self.training:
+                random.shuffle(self.alldata)
 
         if logger is not None:
             logger.info('[INFO] %s loaded with %d instructions, using splits: %s' % (
@@ -204,6 +325,7 @@ class SrcDataset(torch_data.Dataset):
         self.data = dict()
         self.alldata = []
         self.gt_trajs = {}
+        self.eqa_features = None
         for source in config.SOURCE:
             if source == 'R2R':
                 _anno_file = _root_dir / config.R2R.DIR / config.R2R.SPLIT[self.split]
@@ -251,6 +373,24 @@ class SrcDataset(torch_data.Dataset):
                 )
 
                 msg += '\n- Dataset: load {} CVDN samples'.format(len(self.data['cvdn']))
+            elif source == 'EQA':
+                _anno_dir = Path(config.EQA.DIR) / config.EQA.SPLIT[self.split]
+                _anno_file = Path(config.EQA.DIR) / '{}.json.gz'.format(config.EQA.SPLIT[self.split])
+
+                self.data['eqa'], self.answer_vocab = load_eqa_data(anno_dir=_anno_dir, anno_file=_anno_file)
+
+                # re-construct answer vocab
+                for idx, key in enumerate(sorted(self.answer_vocab.word2idx_dict.keys())):
+                    self.answer_vocab.word2idx_dict[key] = idx
+
+                from duet.map_nav_src_llm.utils.data import ImageFeaturesDB
+                if self.split == 'train':
+                    img_ft_file = config.EQA.Feats.format(split='train')
+                    self.eqa_features = ImageFeaturesDB(str(img_ft_file), 768)
+                else:
+                    img_ft_file = config.EQA.Feats.format(split='val')
+                    self.eqa_features = ImageFeaturesDB(str(img_ft_file), 768)
+                msg += '\n- Dataset: load {} EQA samples'.format(len(self.data['eqa']))
             else:
                 NotImplementedError
 
@@ -259,7 +399,7 @@ class SrcDataset(torch_data.Dataset):
         msg += '\n- Dataset: load {} split: {} samples in total'.format(self.split, len(self.alldata))
         self.scans = set([x['scan'] for x in self.alldata])
         msg += '\n- Dataset: load {} split: {} scans in total'.format(self.split, len(self.scans))
-        del self.data
+        # del self.data
         return msg
 
     def get_gt_trajs(self, data):
@@ -307,7 +447,53 @@ class SrcDataset(torch_data.Dataset):
         for scan, G in self.graphs.items():  # compute all shortest paths
             self.shortest_distances[scan] = dict(nx.all_pairs_dijkstra_path_length(G))
 
-    def make_candidate(self, feature, scanId, viewpointId, viewId):
+    def make_eqa_candidate(self, feature, scanId, viewpointId, viewId, is_eqa=True):
+        adj_dict = {}
+        assert feature.shape[0] == 5
+        for ix in range(feature.shape[0]):
+            if ix == 0:
+                self.sim.newEpisode([scanId], [viewpointId], [0], [math.radians(-30)])
+            elif ix % 12 == 0:
+                self.sim.makeAction([0], [1.0], [1.0])
+            else:
+                self.sim.makeAction([0], [1.0], [0])
+
+            state = self.sim.getState()[0]
+            assert state.viewIndex == ix
+
+            # Heading and elevation for the viewpoint center
+            heading = 0.0
+            elevation = 0.0
+
+            visual_feat = feature[ix]
+            distance = 0.0
+
+            # EQA: no candidates, candidates is self-viewpoint
+            loc = state.navigableLocations[0]
+            loc_heading = 0.0
+            loc_elevation = 0.0
+
+            angle_feat = angle_feature(loc_heading, loc_elevation, self.angle_feat_size)
+            angle_feat = np.zeros_like(angle_feat)
+
+            adj_dict[ix] = {
+                'heading': loc_heading,
+                'elevation': loc_elevation,
+                "normalized_heading": state.heading + loc.rel_heading,
+                "normalized_elevation": state.elevation + loc.rel_elevation,
+                'scanId': scanId,
+                'viewpointId': loc.viewpointId,  # Next viewpoint id
+                'pointId': ix,
+                'distance': distance,
+                'idx': ix,
+                'feature': np.concatenate((visual_feat, angle_feat), -1),
+                'position': (loc.x, loc.y, loc.z),
+            }
+
+        candidate = list(adj_dict.values())
+        return candidate
+
+    def make_candidate(self, feature, scanId, viewpointId, viewId, is_eqa=False):
         def _loc_distance(loc):
             return np.sqrt(loc.rel_heading ** 2 + loc.rel_elevation ** 2)
         base_heading = (viewId % 12) * math.radians(30)
@@ -316,48 +502,55 @@ class SrcDataset(torch_data.Dataset):
         adj_dict = {}
         long_id = "%s_%s" % (scanId, viewpointId)
         if long_id not in self.buffered_state_dict:
-            for ix in range(36):
-                if ix == 0:
-                    self.sim.newEpisode([scanId], [viewpointId], [0], [math.radians(-30)])
-                elif ix % 12 == 0:
-                    self.sim.makeAction([0], [1.0], [1.0])
-                else:
-                    self.sim.makeAction([0], [1.0], [0])
+            if is_eqa:
+                raise NotImplementedError
+            else:
+                for ix in range(36):
+                    if ix == 0:
+                        self.sim.newEpisode([scanId], [viewpointId], [0], [math.radians(-30)])
+                    elif ix % 12 == 0:
+                        self.sim.makeAction([0], [1.0], [1.0])
+                    else:
+                        self.sim.makeAction([0], [1.0], [0])
 
-                state = self.sim.getState()[0]
-                assert state.viewIndex == ix
+                    state = self.sim.getState()[0]
+                    assert state.viewIndex == ix
 
-                # Heading and elevation for the viewpoint center
-                heading = state.heading - base_heading
-                elevation = state.elevation - base_elevation
+                    # Heading and elevation for the viewpoint center
+                    heading = state.heading - base_heading
+                    elevation = state.elevation - base_elevation
 
-                visual_feat = feature[ix]
+                    visual_feat = feature[ix]
 
-                # get adjacent locations
-                for j, loc in enumerate(state.navigableLocations[1:]):
-                    # if a loc is visible from multiple view, use the closest
-                    # view (in angular distance) as its representation
-                    distance = _loc_distance(loc)
+                    # get adjacent locations
+                    for j, loc in enumerate(state.navigableLocations[1:]):
+                        # if a loc is visible from multiple view, use the closest
+                        # view (in angular distance) as its representation
+                        distance = _loc_distance(loc)
 
-                    # Heading and elevation for for the loc
-                    loc_heading = heading + loc.rel_heading
-                    loc_elevation = elevation + loc.rel_elevation
-                    angle_feat = angle_feature(loc_heading, loc_elevation, self.angle_feat_size)
-                    if (loc.viewpointId not in adj_dict or
-                            distance < adj_dict[loc.viewpointId]['distance']):
-                        adj_dict[loc.viewpointId] = {
-                            'heading': loc_heading,
-                            'elevation': loc_elevation,
-                            "normalized_heading": state.heading + loc.rel_heading,
-                            "normalized_elevation": state.elevation + loc.rel_elevation,
-                            'scanId': scanId,
-                            'viewpointId': loc.viewpointId, # Next viewpoint id
-                            'pointId': ix,
-                            'distance': distance,
-                            'idx': j + 1,
-                            'feature': np.concatenate((visual_feat, angle_feat), -1),
-                            'position': (loc.x, loc.y, loc.z),
-                        }
+                        # Heading and elevation for for the loc
+                        loc_heading = heading + loc.rel_heading
+                        loc_elevation = elevation + loc.rel_elevation
+                        angle_feat = angle_feature(loc_heading, loc_elevation, self.angle_feat_size)
+                        if is_eqa:
+                            angle_feat = np.zeros_like(angle_feat)
+
+                        if (loc.viewpointId not in adj_dict or
+                                distance < adj_dict[loc.viewpointId]['distance']):
+                            adj_dict[loc.viewpointId] = {
+                                'heading': loc_heading,
+                                'elevation': loc_elevation,
+                                "normalized_heading": state.heading + loc.rel_heading,
+                                "normalized_elevation": state.elevation + loc.rel_elevation,
+                                'scanId': scanId,
+                                'viewpointId': loc.viewpointId, # Next viewpoint id
+                                'pointId': ix,
+                                'distance': distance,
+                                'idx': j + 1,
+                                'feature': np.concatenate((visual_feat, angle_feat), -1),
+                                'position': (loc.x, loc.y, loc.z),
+                            }
+
             candidate = list(adj_dict.values())
             self.buffered_state_dict[long_id] = [
                 {key: c[key]
@@ -389,14 +582,26 @@ class SrcDataset(torch_data.Dataset):
             item = items[i]
             base_view_id = state.viewIndex
 
-            if feature is None:
-                feature = self.feat_db.get_image_feature(state.scanId, state.location.viewpointId)
+            if data_type == 'eqa':
+                feature = self.eqa_features.get_eqa_feature(
+                    split='train' if self.split == 'train' else 'val',
+                    idx=item['episode_id']
+                )
+                # Full features
+                candidate = self.make_eqa_candidate(feature, state.scanId, state.location.viewpointId, state.viewIndex, is_eqa=True)
+                extra_feature = np.zeros((36-feature.shape[0],feature.shape[1]),dtype=feature.dtype)
+                feature = np.concatenate([feature, extra_feature], 0)
+                # [visual_feature, angle_feature] for views
+                feature = np.concatenate((feature, np.zeros_like(self.angle_feature[12][:feature.shape[0],:])), -1)
+            else:
+                if feature is None:
+                    feature = self.feat_db.get_image_feature(state.scanId, state.location.viewpointId)
 
-            # Full features
-            candidate = self.make_candidate(feature, state.scanId, state.location.viewpointId, state.viewIndex)
+                # Full features
+                candidate = self.make_candidate(feature, state.scanId, state.location.viewpointId, state.viewIndex)
 
-            # [visual_feature, angle_feature] for views
-            feature = np.concatenate((feature, self.angle_feature[base_view_id]), -1)
+                # [visual_feature, angle_feature] for views
+                feature = np.concatenate((feature, self.angle_feature[base_view_id]), -1)
 
             # if data_type == 'reverie' and self.obj_db is not None:
             #     # objects
@@ -493,6 +698,33 @@ class SrcDataset(torch_data.Dataset):
         data_type = item['data_type']
         scan = item['scan']
         instr_id = item['instr_id']
+
+        if data_type == 'eqa':
+            item['instruction'] = item['question_text']
+            scanIds = [scan]
+            item['heading'] = 0.0
+            item['instr_encoding'] = None
+            item['path_id'] = None
+            item['path'] = self.shortest_paths[scan][
+                list(self.shortest_paths[scan].keys())[0]
+            ][list(self.shortest_paths[scan].keys())[0]]
+            viewpointIds = [item['path'][0]]
+            headings = [item['heading']]
+
+            env = EnvBatch(connectivity_dir=self.connectivity_dir, batch_size=1)
+            env.newEpisodes(scanIds, viewpointIds, headings)
+            observations = self.get_obs(items=[item], env=env, data_type=data_type)[0]
+            observations['answer'] = self.answer_vocab.word2idx(item['answer_text'])
+            data_dict = {
+                'sample_idx': index,
+                'instr_id': instr_id,
+                'observations': observations,
+                'env': env,
+                'item': item,
+                # 'instr': instr,
+                'data_type': data_type,
+            }
+            return data_dict
 
         # check length of instruction
         max_len = 128
@@ -637,29 +869,32 @@ class SrcDataset(torch_data.Dataset):
         return scores
 
     def eval_cvdn(self, scan, path, gt_item):
+        ''' Calculate error based on the final position in trajectory, and also
+            the closest position (oracle stopping rule). '''
         shortest_distances = self.shortest_distances[scan]
 
         start = gt_item['path'][0]
         assert start == path[0], 'Result trajectories should include the start position'
         goal = gt_item['path'][-1]
         planner_goal = gt_item['planner_path'][-1]  # for calculating oracle planner success (e.g., passed over desc goal?)
-        final_position = path[0]  # 预测
+        final_position = path[-1]  # 预测
         nearest_position = self.get_nearest(shortest_distances, goal, path)
         nearest_planner_position = self.get_nearest(shortest_distances, planner_goal, path)
         dist_to_end_start = None
         dist_to_end_end = None
         for end_pano in gt_item['end_panos']:
-            d = shortest_distances[start][end_pano]
+            d = shortest_distances[start][end_pano]  # distance from start -> goal
             if dist_to_end_start is None or d < dist_to_end_start:
                 dist_to_end_start = d
-            d = shortest_distances[final_position][end_pano]
+            d = shortest_distances[final_position][end_pano]  # dis from pred_end -> goal
             if dist_to_end_end is None or d < dist_to_end_end:
                 dist_to_end_end = d
-        scores = defaultdict(list)
-        scores['nav_errors'].append(shortest_distances[final_position][goal])
-        scores['oracle_errors'].append(shortest_distances[nearest_position][goal])
-        scores['oracle_plan_errors'].append(shortest_distances[nearest_planner_position][planner_goal])
-        scores['dist_to_end_reductions'].append(dist_to_end_start - dist_to_end_end)
+
+        scores = dict()
+        scores['nav_errors'] = shortest_distances[final_position][goal]
+        scores['oracle_errors'] = shortest_distances[nearest_position][goal]
+        scores['oracle_plan_errors'] = shortest_distances[nearest_planner_position][planner_goal]
+        scores['dist_to_end_reductions'] = dist_to_end_start - dist_to_end_end
         distance = 0  # Work out the length of the path in meters
         prev = path[0]
         for curr in path[1:]:
@@ -670,8 +905,8 @@ class SrcDataset(torch_data.Dataset):
                     print(err)
             distance += shortest_distances[prev][curr]
             prev = curr
-        scores['trajectory_lengths'].append(distance)
-        scores['shortest_path_lengths'].append(shortest_distances[start][goal])
+        scores['trajectory_lengths'] = distance
+        scores['shortest_path_lengths'] = shortest_distances[start][goal]
         return scores
 
     def eval_dis_item(self, scan, pred_path, gt_path):
@@ -751,20 +986,20 @@ class SrcDataset(torch_data.Dataset):
             metrics['instr_id'].append(instr_id)
 
         if data_type == 'cvdn':
-            num_successes = len([i for i in traj_scores['nav_errors'] if i < ERROR_MARGIN])
-            oracle_successes = len([i for i in traj_scores['oracle_errors'] if i < ERROR_MARGIN])
-            oracle_plan_successes = len([i for i in traj_scores['oracle_plan_errors'] if i < ERROR_MARGIN])
+            num_successes = len([i for i in metrics['nav_errors'] if i < ERROR_MARGIN])
+            oracle_successes = len([i for i in metrics['oracle_errors'] if i < ERROR_MARGIN])
+            oracle_plan_successes = len([i for i in metrics['oracle_plan_errors'] if i < ERROR_MARGIN])
 
             avg_metrics = {
-                'lengths': np.average(traj_scores['trajectory_lengths']),
-                'nav_error': np.average(traj_scores['nav_errors']),
-                'oracle_sr': float(oracle_successes) / float(len(traj_scores['oracle_errors'])),
-                'sr': float(num_successes) / float(len(traj_scores['nav_errors'])),
-                'spl': 0.0,
+                'lengths': np.average(metrics['trajectory_lengths']),
+                'nav_error': np.average(metrics['nav_errors']),
+                'oracle_sr': float(oracle_successes) / float(len(metrics['oracle_errors'])) * 100,
+                'sr': float(num_successes) / float(len(metrics['nav_errors'])) * 100,
+                # 'spl': 0.0 * 100,
                 'oracle path_success_rate': float(oracle_plan_successes) / float(
-                    len(traj_scores['oracle_plan_errors'])),
-                'dist_to_end_reduction': sum(traj_scores['dist_to_end_reductions']) / float(
-                    len(traj_scores['dist_to_end_reductions']))
+                    len(metrics['oracle_plan_errors'])) * 100,
+                'dist_to_end_reduction': sum(metrics['dist_to_end_reductions']) / float(
+                    len(metrics['dist_to_end_reductions']))
             }
         else:
             avg_metrics = {
@@ -781,6 +1016,59 @@ class SrcDataset(torch_data.Dataset):
                 'CLS': np.mean(metrics['CLS']) * 100,
             }
         return avg_metrics, metrics
+
+    def eval_eqa_metrics(self, preds, logger=None):
+        logger.info('eval %d predictions' % (len(preds))) if logger is not None else None
+
+        metrics = VqaMetric(
+            info={"split": "val"},
+            metric_names=[
+                "loss",
+                "accuracy",
+                "mean_rank",
+                "mean_reciprocal_rank",
+            ],
+        )
+
+        avg_loss = 0.0
+        avg_accuracy = 0.0
+        avg_mean_rank = 0.0
+        avg_mean_reciprocal_rank = 0.0
+
+        for item in preds:
+            instr_id = item['instr_id']
+            scores = item['eqa']['scores'][0].unsqueeze(0)
+            answers = torch.tensor([item['eqa']['gt'][0]])
+            loss = item['eqa']['loss']
+            accuracy, ranks = metrics.compute_ranks(
+                scores, answers
+            )
+            metrics.update([loss[0].item(), accuracy, ranks, 1.0 / ranks])
+            (
+                metrics_loss,
+                accuracy,
+                mean_rank,
+                mean_reciprocal_rank,
+            ) = metrics.get_stats()
+
+            avg_loss += metrics_loss
+            avg_accuracy += accuracy
+            avg_mean_rank += mean_rank
+            avg_mean_reciprocal_rank += mean_reciprocal_rank
+
+        num_samples = len(preds)
+        avg_loss /= num_samples
+        avg_accuracy /= num_samples
+        avg_mean_rank /= num_samples
+        avg_mean_reciprocal_rank /= num_samples
+
+        avg_metrics = {
+            'avg_loss': avg_loss,
+            'avg_accuracy': avg_accuracy,
+            'avg_mean_rank': avg_mean_rank,
+            'avg_mean_reciprocal_rank': avg_mean_reciprocal_rank,
+        }
+        return avg_metrics
 
 
 class DistributedSampler(_DistributedSampler):

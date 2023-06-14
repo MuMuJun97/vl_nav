@@ -1,6 +1,6 @@
 import numpy as np
 import collections
-
+from typing import Dict, Iterable, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -58,9 +58,9 @@ def llama_model_in_debug_model(lang_encoder_path):
     from pathlib import Path
     with open(lang_encoder_path, "rb") as f:
         config = pickle.load(f)
-        config.intermediate_size = 128
-        config.num_hidden_layers = 1
-        config.hidden_size = 128
+        config.intermediate_size = 1024
+        config.num_hidden_layers = 2
+        config.hidden_size = 1024
     model_args = ()
     model_kwargs = {}
     with ContextManagers(init_contexts):
@@ -641,6 +641,9 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         self.global_encoder = GlobalMapEncoder(config)
         self.sap_fuse_linear = ClsPrediction(config.hidden_size, input_size=config.hidden_size * 2)
 
+        self.eqa_ans_dim = 35
+        self.eqa_embeddings = nn.Embedding(self.eqa_ans_dim, config.hidden_size)
+
         self.fuse_encoder = FuseEncoder(config.hidden_size)
 
         self.out_head = ClsPrediction(self.lang_model.hidden_size).to(self.lang_model.model_type)
@@ -691,7 +694,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         pano_embeds = self.img_embeddings.layer_norm(pano_embeds)
         pano_embeds = self.img_embeddings.dropout(pano_embeds)
 
-        pano_masks = gen_seq_masks(pano_lens)
+        pano_masks = gen_seq_masks(pano_lens, max_len=pano_embeds.shape[-2])
         if self.img_embeddings.pano_encoder is not None:
             pano_embeds = self.img_embeddings.pano_encoder(
                 pano_embeds, src_key_padding_mask=pano_masks.logical_not()
@@ -710,6 +713,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             return pano_embeds, pano_masks
 
         elif mode == 'navigation':
+            data_type = batch['data_type']
             vp_img_embeds = batch['vp_img_embeds']
             batch_size = vp_img_embeds.size(0)
             gmap_img_embeds, gmap_step_ids, gmap_pos_fts, \
@@ -718,9 +722,14 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
                 batch['gmap_masks'], batch['gmap_pair_dists'], batch['gmap_visited_masks'], batch['gmap_vpids'],
 
             # global branch [B, Nums, D=768]
-            gmap_embeds = gmap_img_embeds + \
-                          self.global_encoder.gmap_step_embeddings(gmap_step_ids) + \
-                          self.global_encoder.gmap_pos_embeddings(gmap_pos_fts)
+            gmap_embeds = torch.zeros_like(gmap_img_embeds)
+            for b_ix in range(len(data_type)):
+                if data_type[b_ix] == 'eqa':
+                    gmap_embeds[b_ix:b_ix+1] = gmap_img_embeds[b_ix:b_ix+1]
+                else:
+                    gmap_embeds[b_ix:b_ix+1] = gmap_img_embeds[b_ix:b_ix+1] + \
+                                  self.global_encoder.gmap_step_embeddings(gmap_step_ids[b_ix:b_ix+1]) + \
+                                  self.global_encoder.gmap_pos_embeddings(gmap_pos_fts[b_ix:b_ix+1])
 
             if self.global_encoder.sprel_linear is not None:
                 graph_sprels = self.global_encoder.sprel_linear(
@@ -739,7 +748,13 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
                 batch['vp_img_embeds'], batch['vp_pos_fts'], batch['vp_masks'], \
                     batch['vp_nav_masks'], batch['vp_obj_masks'], batch['vp_cand_vpids']
 
-            vp_embeds = vp_img_embeds + self.local_encoder.vp_pos_embeddings(vp_pos_fts)
+            vp_embeds = torch.zeros_like(vp_img_embeds)
+            for b_ix in range(len(data_type)):
+                if data_type[b_ix] == 'eqa':
+                    vp_embeds[b_ix:b_ix+1] = vp_img_embeds[b_ix:b_ix+1]
+                else:
+                    vp_embeds[b_ix:b_ix+1] = vp_img_embeds[b_ix:b_ix+1] \
+                        + self.local_encoder.vp_pos_embeddings(vp_pos_fts[b_ix:b_ix+1])
             vp_embeds = self.local_encoder.encoder(vp_embeds, vp_masks)
 
             fuse_weights = torch.sigmoid(self.sap_fuse_linear(
@@ -756,28 +771,59 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
 
             fuse_embeds = torch.clone(global_gmap_embeds)
             fuse_embeds[:, 0] += local_vp_embeds[:, 0]  # stop
+
             for i in range(batch_size):
-                visited_nodes = set([vp for vp, mask in zip(gmap_vpids[i], gmap_visited_masks[i]) if mask])
-                tmp = {}
-                bw_logits = 0
-                for j, cand_vpid in enumerate(vp_cand_vpids[i]):
-                    if j > 0:
-                        if cand_vpid in visited_nodes:
-                            bw_logits += local_vp_embeds[i, j]
-                        else:
-                            tmp[cand_vpid] = local_vp_embeds[i, j]
-                for j, vp in enumerate(gmap_vpids[i]):
-                    if j > 0 and vp not in visited_nodes:
-                        if vp in tmp:
-                            fuse_embeds[i, j] += tmp[vp]
-                        else:
-                            fuse_embeds[i, j] += bw_logits
+                if data_type[i] == 'eqa':
+                    # fuse_embeds[i, 0] = torch.zeros_like(fuse_embeds[i, 0])
+                    for j, vp in enumerate(gmap_vpids[i]):
+                        if j > 0:
+                            tmp = []
+                            for l, _ in enumerate(vp_cand_vpids[i]):
+                                if l > 0:
+                                    tmp.append(local_vp_embeds[i, l])
+                            fuse_embeds[i, j] = torch.stack(tmp, dim=0).mean(dim=0)
+                else:
+                    visited_nodes = set([vp for vp, mask in zip(gmap_vpids[i], gmap_visited_masks[i]) if mask])
+                    tmp = {}
+                    bw_logits = 0
+                    for j, cand_vpid in enumerate(vp_cand_vpids[i]):
+                        if j > 0:
+                            if cand_vpid in visited_nodes:
+                                bw_logits += local_vp_embeds[i, j]
+                            else:
+                                tmp[cand_vpid] = local_vp_embeds[i, j]
+                    for j, vp in enumerate(gmap_vpids[i]):
+                        if j > 0 and vp not in visited_nodes:
+                            if vp in tmp:
+                                fuse_embeds[i, j] += tmp[vp]
+                            else:
+                                fuse_embeds[i, j] += bw_logits
 
             fuse_embeds = self.fuse_encoder(fuse_embeds)
             fuse_embeds.masked_fill_(gmap_visited_masks.unsqueeze(-1), 0.)
             fuse_embeds.masked_fill_(gmap_masks.logical_not().unsqueeze(-1), 0.)
 
             ########### cross-modal #############
+            if 'eqa' in data_type:
+                max_len = max(self.eqa_ans_dim, gmap_masks.shape[-1])
+                pad_gmap_masks = torch.zeros((gmap_masks.shape[0], max_len), device=gmap_masks.device).bool()
+                pad_fuse_embeds = torch.zeros((fuse_embeds.shape[0], max_len, fuse_embeds.shape[-1]),
+                    device=fuse_embeds.device, dtype=fuse_embeds.dtype)
+                pad_gmap_visited_masks = torch.zeros((gmap_visited_masks.shape[0], max_len),
+                                                     device=gmap_visited_masks.device).bool()
+                pad_gmap_visited_masks[:, :gmap_visited_masks.shape[-1]] = gmap_visited_masks
+                for idx in range(len(data_type)):
+                    if data_type[idx] == 'eqa':
+                        pad_gmap_masks[idx, :self.eqa_ans_dim] = torch.ones_like(pad_gmap_masks[idx, :self.eqa_ans_dim]).bool()
+                        pad_fuse_embeds[idx, :self.eqa_ans_dim] = torch.cat([fuse_embeds[idx, 1:2]]*self.eqa_ans_dim) + \
+                            self.eqa_embeddings(torch.arange(self.eqa_ans_dim).to(fuse_embeds.device))
+                    else:
+                        pad_gmap_masks[idx, :gmap_masks[idx].shape[-1]] = gmap_masks[idx]
+                        pad_fuse_embeds[idx, :fuse_embeds.shape[-2]] = fuse_embeds[idx, :fuse_embeds.shape[-2]]
+
+                gmap_masks, fuse_embeds = pad_gmap_masks, pad_fuse_embeds
+                gmap_visited_masks = pad_gmap_visited_masks
+
             cand_masks = torch.clone(gmap_masks)
             cand_nums = cand_masks.sum(dim=-1)
             instruction = batch['instruction']
@@ -793,7 +839,11 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
 
             cand_text = []
             for idx, cand_num in enumerate(cand_nums):
-                cand_text.append(''.join(['<cand>'.format(i) for i in range(cand_num)]))
+                if data_type[idx] == 'eqa':
+                    cand_text.append(''.join(['<cand>'.format(i) for i in range(self.eqa_ans_dim)]))
+                    cand_nums[idx] = self.eqa_ans_dim
+                else:
+                    cand_text.append(''.join(['<cand>'.format(i) for i in range(cand_num)]))
             cand_text = ['\nEnvironment: ' + text + '\nAgent: <s>' for text in cand_text]
 
             all_text = ["Conmander: {} \nHistory: {} {}".format(a, b, c) for a, b, c in

@@ -4,12 +4,16 @@ import pickle
 import time
 import os
 import torch
+import gzip
+from typing import Iterable, List, Union
 import numpy as np
 import networkx as nx
 from pathlib import Path
 import cv2
 import ast
+import re
 import jsonlines
+SENTENCE_SPLIT_REGEX = re.compile(r"([^\w-]+)")
 debug = False
 
 
@@ -236,112 +240,261 @@ def load_fr2r_data(anno_file):
     return new_data
 
 
-def load_eqa_data(anno_file, split='train', vis=False):
-    # raise NotImplementedError
-    # assert anno_file.exists()
-    with open(str(anno_file)) as f:
-        data = json.load(f)[split]
+def load_str_list(fname):
+    with open(fname) as f:
+        lines = f.readlines()
+    lines = [l.strip() for l in lines]
+    return lines
 
-    # filter data:
-    new_data = []
-    qa_set = set()
 
-    sample_index = 0
+def tokenize(
+    sentence, regex=SENTENCE_SPLIT_REGEX, keep=("'s"), remove=(",", "?")
+) -> List[str]:
+    sentence = sentence.lower()
 
-    for i, item in enumerate(data):
-        qa_item = item['question']['question_text'] + \
-                  item['question']['answer_text'] + \
-                  item['path'][-1] + \
-                  item['path'][0]
-        if qa_item in qa_set:
-            continue
+    for token in keep:
+        sentence = sentence.replace(token, " " + token)
+
+    for token in remove:
+        sentence = sentence.replace(token, "")
+
+    tokens = regex.split(sentence)
+    tokens = [t.strip() for t in tokens if len(t.strip()) > 0]
+    return tokens
+
+
+class VocabDict:
+    UNK_TOKEN = "<unk>"
+    PAD_TOKEN = "<pad>"
+    START_TOKEN = "<s>"
+    END_TOKEN = "</s>"
+
+    def __init__(self, word_list=None, filepath=None):
+        if word_list is not None:
+            self.word_list = word_list
+            self._build()
+
+        elif filepath:
+            self.word_list = load_str_list(filepath)
+            self._build()
+
+    def _build(self):
+        if self.UNK_TOKEN not in self.word_list:
+            self.word_list = [self.UNK_TOKEN] + self.word_list
+
+        self.word2idx_dict = {w: n_w for n_w, w in enumerate(self.word_list)}
+
+        # String (word) to integer (index) dict mapping
+        self.stoi = self.word2idx_dict
+        # Integer to string (word) reverse mapping
+        self.itos = self.word_list
+        self.num_vocab = len(self.word_list)
+
+        self.UNK_INDEX = (
+            self.word2idx_dict[self.UNK_TOKEN]
+            if self.UNK_TOKEN in self.word2idx_dict
+            else None
+        )
+
+        self.PAD_INDEX = (
+            self.word2idx_dict[self.PAD_TOKEN]
+            if self.PAD_TOKEN in self.word2idx_dict
+            else None
+        )
+
+    def idx2word(self, n_w):
+        return self.word_list[n_w]
+
+    def token_idx_2_string(self, tokens: Iterable[int]) -> str:
+        q_string = ""
+        for token in tokens:
+            if token != 0:
+                q_string += self.idx2word(token) + " "
+
+        q_string += "?"
+        return q_string
+
+    def __len__(self):
+        return len(self.word_list)
+
+    def get_size(self):
+        return len(self.word_list)
+
+    def get_unk_index(self):
+        return self.UNK_INDEX
+
+    def get_unk_token(self):
+        return self.UNK_TOKEN
+
+    def word2idx(self, w):
+        if w in self.word2idx_dict:
+            return self.word2idx_dict[w]
+        elif self.UNK_INDEX is not None:
+            return self.UNK_INDEX
         else:
-            qa_set.add(qa_item)
+            raise ValueError(
+                "word %s not in dictionary \
+                             (while dictionary does not contain <unk>)"
+                % w
+            )
 
-            new_item = dict(item)
-            new_item['sample_idx'] = sample_index
-            new_item['instr_id'] = item['episode_id']
-            new_item['instruction'] = item['question']['question_text']
-            new_item['data_type'] = 'eqa'
-            question_type = item['question']['question_type']
+    def tokenize_and_index(
+        self,
+        sentence,
+        regex=SENTENCE_SPLIT_REGEX,
+        keep=("'s"),
+        remove=(",", "?"),
+    ) -> List[int]:
+        inds = [
+            self.word2idx(w)
+            for w in tokenize(sentence, regex=regex, keep=keep, remove=remove)
+        ]
+        return inds
 
-            question_location = item['question']['question_location']
-            if '_' in question_location:
-                item['question']['question_location'] = ' '.join(question_location.split('_'))
 
-            if question_type == 'color_room':
-                answer_prompt = "The color of the {target} in the {room} is {answer}".format(
-                    target=item['question']['question_object'],
-                    room=item['question']['question_location'],
-                    answer=item['question']['answer_text']
-                )
-            elif question_type == 'color':
-                answer_prompt = "The color of the {target} is {answer}".format(
-                    target=item['question']['question_object'],
-                    answer=item['question']['answer_text']
-                )
-            elif question_type == 'location':
-                answer_prompt = "The location of the {target} is {answer}".format(
-                    target=item['question']['question_object'],
-                    answer=item['question']['answer_text']
-                )
-            else:
-                raise NotImplementedError
+def load_eqa_data(anno_dir, anno_file):
+    with gzip.open(str(anno_file), "rt") as f:
+        deserialized = json.loads(f.read())
+        answer_vocab = VocabDict(
+            word_list=deserialized['answer_vocab']["word_list"]  # type: ignore
+        )
+        question_vocab = VocabDict(
+            word_list=deserialized['question_vocab']["word_list"]  # type: ignore
+        )
+        episodes = deserialized['episodes']
+    del deserialized
+    new_data = []
+    for ep_index, episode in enumerate(episodes):
+        item = dict()
+        item['scan'] = episode['scene_id'].replace(".glb","").split("/")[-1]
+        item['episode_id'] = ep_index
+        item['instr_id'] = '{}_{}'.format('eqa', ep_index)
+        item['data_type'] = 'eqa'
+        item['question_text'] = episode['question']['question_text']
+        item['answer_text'] = episode['question']['answer_text']
+        item['question_type'] = episode['question']['question_type']
+        item['question_tokens'] = episode['question']['question_tokens']
+        item['answer_token'] = episode['question']['answer_token']
 
-            new_item['texts'] = {len(new_item['path']) - 1: [answer_prompt]}
-            new_data.append(new_item)
-            sample_index += 1
+        imgs = []
+        for i in range(5):
+            fname = anno_dir / "{}.{}.jpg".format('%04d' % ep_index, '%03d' % i)
+            assert fname.exists()
+            imgs.append(fname)
+        item['images'] = imgs
+        new_data.append(item)
+    del episodes
+    if debug:
+        return new_data[:20], answer_vocab
+    else:
+        return new_data, answer_vocab
 
-    if False:
-        img_dir = Path("/media/zlin/2CD830B2D8307C60/Dataset/features/mp3d_raw_images")
-        qa_dict = {}
-        # new_data = []
-        qa_set = set()
-        for i, item in enumerate(new_data):
-            scan = item['scan']
-            path = item['path']
-
-            location = item['question']['question_location']
-            target = item['question']['question_object']
-            answer = item['question']['answer_text']
-
-            qa_item = item['question']['question_text'] + path[-1] + answer
-            if qa_item in qa_set:
-                continue
-
-            qa_set.add(qa_item)
-
-            # if qa_dict.get(location, None) is None:
-            #     qa_dict[location] = dict()
-            # if qa_dict[location].get(target, None) is None:
-            #     qa_dict[location][target] = dict()
-            # if qa_dict[location][target].get(answer, None) is None:
-            #     qa_dict[location][target][answer] = {
-            #         'type': item['question']['question_type'],
-            #         'scan': scan,
-            #         'target': path[-1],
-            #     }
-            # else:
-            #     prev_qa = qa_dict[location][target][answer]
-            #     if prev_qa['target'] == path[-1] \
-            #             and prev_qa['scan'] == scan \
-            #             and prev_qa['type'] == item['question']['question_type']:
-            #         continue
-
-            print(item['question'])
-            for j, vp in enumerate(path):
-                img_file = img_dir / scan / '{}_{}.png'.format(scan, vp)
-                assert img_file.exists()
-                panoramic_img = cv2.imread(str(img_file))  # BRG
-                panoramic_img = np.hsplit(panoramic_img, 12)
-                from dataset.utils.visualize_mp3d import show_12_images
-                vimgs = show_12_images(
-                    panoramic_img
-                )
-                cv2.imshow('vimg',vimgs)
-                cv2.waitKey(0)
-            # new_data.append(item)
-    return new_data
+# def load_eqa_data(anno_file, split='train', vis=False):
+#     # raise NotImplementedError
+#     # assert anno_file.exists()
+#     with open(str(anno_file)) as f:
+#         data = json.load(f)[split]
+#
+#     # filter data:
+#     new_data = []
+#     qa_set = set()
+#
+#     sample_index = 0
+#
+#     for i, item in enumerate(data):
+#         qa_item = item['question']['question_text'] + \
+#                   item['question']['answer_text'] + \
+#                   item['path'][-1] + \
+#                   item['path'][0]
+#         if qa_item in qa_set:
+#             continue
+#         else:
+#             qa_set.add(qa_item)
+#
+#             new_item = dict(item)
+#             new_item['sample_idx'] = sample_index
+#             new_item['instr_id'] = item['episode_id']
+#             new_item['instruction'] = item['question']['question_text']
+#             new_item['data_type'] = 'eqa'
+#             question_type = item['question']['question_type']
+#
+#             question_location = item['question']['question_location']
+#             if '_' in question_location:
+#                 item['question']['question_location'] = ' '.join(question_location.split('_'))
+#
+#             if question_type == 'color_room':
+#                 answer_prompt = "The color of the {target} in the {room} is {answer}".format(
+#                     target=item['question']['question_object'],
+#                     room=item['question']['question_location'],
+#                     answer=item['question']['answer_text']
+#                 )
+#             elif question_type == 'color':
+#                 answer_prompt = "The color of the {target} is {answer}".format(
+#                     target=item['question']['question_object'],
+#                     answer=item['question']['answer_text']
+#                 )
+#             elif question_type == 'location':
+#                 answer_prompt = "The location of the {target} is {answer}".format(
+#                     target=item['question']['question_object'],
+#                     answer=item['question']['answer_text']
+#                 )
+#             else:
+#                 raise NotImplementedError
+#
+#             new_item['texts'] = {len(new_item['path']) - 1: [answer_prompt]}
+#             new_data.append(new_item)
+#             sample_index += 1
+#
+#     if False:
+#         img_dir = Path("/media/zlin/2CD830B2D8307C60/Dataset/features/mp3d_raw_images")
+#         qa_dict = {}
+#         # new_data = []
+#         qa_set = set()
+#         for i, item in enumerate(new_data):
+#             scan = item['scan']
+#             path = item['path']
+#
+#             location = item['question']['question_location']
+#             target = item['question']['question_object']
+#             answer = item['question']['answer_text']
+#
+#             qa_item = item['question']['question_text'] + path[-1] + answer
+#             if qa_item in qa_set:
+#                 continue
+#
+#             qa_set.add(qa_item)
+#
+#             # if qa_dict.get(location, None) is None:
+#             #     qa_dict[location] = dict()
+#             # if qa_dict[location].get(target, None) is None:
+#             #     qa_dict[location][target] = dict()
+#             # if qa_dict[location][target].get(answer, None) is None:
+#             #     qa_dict[location][target][answer] = {
+#             #         'type': item['question']['question_type'],
+#             #         'scan': scan,
+#             #         'target': path[-1],
+#             #     }
+#             # else:
+#             #     prev_qa = qa_dict[location][target][answer]
+#             #     if prev_qa['target'] == path[-1] \
+#             #             and prev_qa['scan'] == scan \
+#             #             and prev_qa['type'] == item['question']['question_type']:
+#             #         continue
+#
+#             print(item['question'])
+#             for j, vp in enumerate(path):
+#                 img_file = img_dir / scan / '{}_{}.png'.format(scan, vp)
+#                 assert img_file.exists()
+#                 panoramic_img = cv2.imread(str(img_file))  # BRG
+#                 panoramic_img = np.hsplit(panoramic_img, 12)
+#                 from dataset.utils.visualize_mp3d import show_12_images
+#                 vimgs = show_12_images(
+#                     panoramic_img
+#                 )
+#                 cv2.imshow('vimg',vimgs)
+#                 cv2.waitKey(0)
+#             # new_data.append(item)
+#     return new_data
 
 
 def load_cvdn_data(anno_file, shortest_paths=None):

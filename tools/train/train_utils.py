@@ -55,43 +55,74 @@ def get_grouped_params(model,args):
         {"params": params_without_wd, "weight_decay": 0.0},
     ]
 
-def check_checkpoint(args,model,optimizer,lr_scheduler,logger):
+
+def check_checkpoint(args, model, optimizer, lr_scheduler, logger, is_duet=False):
     # check if a checkpoint exists for this run
     if os.path.exists(f"{args.run_name}") and args.resume_from_checkpoint is None:
-        checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
-        if len(checkpoint_list) == 0:
-            logger.info(f"Found no checkpoints for run {args.run_name}.")
-        else:
-            args.resume_from_checkpoint = sorted(
-                checkpoint_list, key=lambda x: int(x.split("_")[-1].split(".")[0])
-            )[-1]
+        if is_duet:
+            checkpoint_list = glob.glob(f"{args.run_name}/best_val_unseen*")
+            args.resume_from_checkpoint = checkpoint_list[-1]
             logger.info(
-                f"Found checkpoint {args.resume_from_checkpoint} for run {args.run_name}."
+                f"Found checkpoint {args.resume_from_checkpoint} for \n run_name = {args.run_name}."
             )
-    # TODO : resume from checkpoint
-    resume_from_epoch = global_step = 0
-    if args.resume_from_checkpoint is not None:
-        if args.rank == 0:
-            logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
-        checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
-
-        model_state_dict = model.state_dict()
-        state_disk = {k.replace('module.',''):v for k,v in checkpoint["model_state_dict"].items()}
-
-        update_model_state = {}
-        for key, val in state_disk.items():
-            if key in model_state_dict and model_state_dict[key].shape == val.shape:
-                update_model_state[key] = val
+        else:
+            checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
+            if len(checkpoint_list) == 0:
+                logger.info(f"Found no checkpoints for run {args.run_name}.")
             else:
+                args.resume_from_checkpoint = sorted(
+                    checkpoint_list, key=lambda x: int(x.split("_")[-1].split(".")[0])
+                )[-1]
                 logger.info(
-                    'Ignore weight %s: %s' % (key, str(val.shape))
+                    f"Found checkpoint {args.resume_from_checkpoint} for run {args.run_name}."
                 )
-        model.load_state_dict(update_model_state,strict=False)
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"]) if optimizer is not None else None
-        lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"]) if lr_scheduler is not None else None
-        resume_from_epoch = checkpoint["epoch"] + 1
-        global_step = checkpoint["global_step"]
-    return resume_from_epoch, global_step
+    if is_duet:
+        resume_from_epoch = global_step = 0
+        if args.resume_from_checkpoint is not None:
+            if args.rank == 0:
+                logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
+            checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")['vln_bert']
+            model_state_dict = model.state_dict()
+            state_disk = {k.replace('module.', ''): v for k, v in checkpoint['state_dict'].items()}
+            update_model_state = {}
+            for key, val in state_disk.items():
+                if key in model_state_dict and model_state_dict[key].shape == val.shape:
+                    update_model_state[key] = val
+                else:
+                    logger.info(
+                        'Ignore weight %s: %s' % (key, str(val.shape))
+                    )
+            model.load_state_dict(update_model_state, strict=False)
+            resume_from_epoch = checkpoint["epoch"] + 1
+            logger.info("Load epoch: resume from epoch {}".format(resume_from_epoch))
+            return resume_from_epoch, global_step
+
+    else:
+        # TODO : resume from checkpoint
+        resume_from_epoch = global_step = 0
+        if args.resume_from_checkpoint is not None:
+            if args.rank == 0:
+                logger.info(f"Loading checkpoint from {args.resume_from_checkpoint}")
+            checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
+
+            model_state_dict = model.state_dict()
+            state_disk = {k.replace('module.',''):v for k,v in checkpoint["model_state_dict"].items()}
+
+            update_model_state = {}
+            for key, val in state_disk.items():
+                if key in model_state_dict and model_state_dict[key].shape == val.shape:
+                    update_model_state[key] = val
+                else:
+                    logger.info(
+                        'Ignore weight %s: %s' % (key, str(val.shape))
+                    )
+            model.load_state_dict(update_model_state,strict=False)
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"]) if optimizer is not None else None
+            lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"]) if lr_scheduler is not None else None
+            resume_from_epoch = checkpoint["epoch"] + 1
+            global_step = checkpoint["global_step"]
+        return resume_from_epoch, global_step
+
 
 def model_state_to_cpu(model_state):
     model_state_cpu = type(model_state)()  # ordered dict

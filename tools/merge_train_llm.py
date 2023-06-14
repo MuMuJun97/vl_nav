@@ -160,7 +160,10 @@ class NavigationAgent(object):
             batch_view_img_fts.append(torch.from_numpy(view_img_fts))
 
             batch_cand_vpids.append(cand_vpids)
-            batch_view_lens.append(len(view_img_fts))
+            if 'eqa' in ob['instr_id']:
+                batch_view_lens.append(5)
+            else:
+                batch_view_lens.append(len(view_img_fts))
 
             if have_objects[i]:
                 # object
@@ -247,10 +250,12 @@ class NavigationAgent(object):
 
         vp_nav_masks = torch.cat([torch.ones(batch_size, 1).bool().cuda(), nav_types == 1], 1)
 
+        vp_masks = gen_seq_masks(view_lens + 1, max_len=vp_img_embeds.shape[-2])
+
         return {
             'vp_img_embeds': vp_img_embeds,
             'vp_pos_fts': batch_vp_pos_fts,
-            'vp_masks': gen_seq_masks(view_lens + 1),
+            'vp_masks': vp_masks,
             'vp_nav_masks': vp_nav_masks,
             'vp_cand_vpids': [[None] + x for x in cand_vpids],
         }
@@ -305,22 +310,27 @@ class NavigationAgent(object):
             visited_vpids, unvisited_vpids = [], []
             for k in gmap.node_positions.keys():
                 if self.args.act_visited_nodes: # False
-                    if k == obs[i]['viewpoint']:
-                        visited_vpids.append(k)
-                    else:
-                        unvisited_vpids.append(k)
+                    raise NotImplementedError
+                    # if k == obs[i]['viewpoint']:
+                    #     visited_vpids.append(k)
+                    # else:
+                    #     unvisited_vpids.append(k)
                 else:
-                    if gmap.graph.visited(k):
-                        visited_vpids.append(k)
-                    else:
+                    if 'eqa' in obs[i]['instr_id']:  # For EQA
                         unvisited_vpids.append(k)
+                    else:
+                        if gmap.graph.visited(k):
+                            visited_vpids.append(k)
+                        else:
+                            unvisited_vpids.append(k)
             batch_no_vp_left.append(len(unvisited_vpids) == 0)
-            if self.args.enc_full_graph: # True
+            if self.args.enc_full_graph:  # True
                 gmap_vpids = [None] + visited_vpids + unvisited_vpids
                 gmap_visited_masks = [0] + [1] * len(visited_vpids) + [0] * len(unvisited_vpids)
             else:
-                gmap_vpids = [None] + unvisited_vpids
-                gmap_visited_masks = [0] * len(gmap_vpids)
+                raise NotImplementedError
+                # gmap_vpids = [None] + unvisited_vpids
+                # gmap_visited_masks = [0] * len(gmap_vpids)
 
             gmap_step_ids = [gmap.node_step_ids.get(vp, 0) for vp in gmap_vpids]
             gmap_img_embeds = [gmap.get_node_embed(vp) for vp in gmap_vpids[1:]]
@@ -378,7 +388,8 @@ class NavigationAgent(object):
             if ended[i]:                                            # Just ignore this index
                 a[i] = self.args.ignoreid
             else:
-                if imitation_learning:
+                is_r2r = 'r2r' in ob['instr_id']
+                if imitation_learning and is_r2r:
                     assert ob['viewpoint'] == ob['gt_path'][t]
                     if t == len(ob['gt_path']) - 1:
                         a[i] = 0    # stop
@@ -389,7 +400,7 @@ class NavigationAgent(object):
                                 a[i] = j
                                 break
                 else:
-                    ### SOON, REVERIE:
+
                     if ob['viewpoint'] == ob['gt_path'][-1]:
                         a[i] = 0    # Stop if arrived
                     else:
@@ -572,13 +583,11 @@ def rollout(
         do_backward=False,
         is_val=False,  # in validation mode
 ):
+    data_type = batch_dict['data_type']
     obs = batch_dict['observations']
     envs = batch_dict['env']
-    data_type = batch_dict['data_type']
 
-    if 'cvdn' in data_type:
-        max_action_len = 20
-    elif 'cvdn' not in data_type and 'soon' in data_type:
+    if 'cvdn' in data_type or 'soon' in data_type:
         max_action_len = 20
     else:
         max_action_len = args.max_action_len  # 15
@@ -596,6 +605,7 @@ def rollout(
         'instr_id': ob['instr_id'],
         'path': [[ob['viewpoint']]],
         'details': {},
+        'eqa': defaultdict(list),
     } for ob in obs]
 
     # Initialization the tracking state
@@ -647,12 +657,13 @@ def rollout(
             pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)  # [B, 36, D=768], [B, 36,]
             avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
                               torch.sum(pano_masks, 1, keepdim=True)  # [B, D=768]
+            pano_embeds[~pano_masks] = torch.zeros_like(pano_embeds[~pano_masks]) # For EQA
 
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:
                     # update visited node
                     i_vp = obs[i]['viewpoint']
-                    update_avg_pana_embeds = avg_pano_embeds[i].detach()
+                    update_avg_pana_embeds = avg_pano_embeds[i].detach()  # update average features for gmap.
                     gmap.update_node_embed(i_vp, update_avg_pana_embeds, rewrite=True)
                     # update unvisited nodes
                     for j, i_cand_vp in enumerate(pano_inputs['cand_vpids'][i]):
@@ -673,7 +684,8 @@ def rollout(
                 'txt_masks': None,
                 'instruction': instructions,
                 'history': history,
-                'hist_vis': hist_vis
+                'hist_vis': hist_vis,
+                'data_type': data_type
             })
 
             nav_outs = vln_model.vln_bert('navigation', nav_inputs)
@@ -695,15 +707,17 @@ def rollout(
             # Imitation Learning
             if train_ml is not None or feedback == 'gt':
                 # Supervised training
-                if 'cvdn' in data_type:
-                    imitation_learning = False
-                else:
-                    imitation_learning = feedback == 'teacher'
+                imitation_learning = feedback == 'teacher'
                 nav_targets = nav_agent.teacher_action_r4r(
                     obs, nav_vpids, ended,
                     visited_masks=nav_inputs['gmap_visited_masks'],
                     imitation_learning=imitation_learning, t=t, traj=traj
                 )
+                if 'eqa' in data_type:
+                    for idx in range(batch_size):
+                        # if data_type[idx] == 'eqa' and nav_targets[idx] != nav_agent.args.ignoreid:
+                        if data_type[idx] == 'eqa':
+                            nav_targets[idx] = torch.tensor([obs[idx]['answer']], device=nav_targets.device)
                 ############# Single-Step Loss #############
                 cnt_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
                 ml_loss += cnt_loss.detach()
@@ -717,12 +731,25 @@ def rollout(
                 a_t = nav_targets  # teacher forcing
             elif feedback == 'sample':
                 c = torch.distributions.Categorical(nav_probs.float())
-                entropy_metric.accumulate(c.entropy().sum().item()) # For log
+                entropy_metric.accumulate(c.entropy().sum().item())  # For log
                 entropys.append(c.entropy())  # For optimization
                 a_t = c.sample().detach()
             elif feedback == 'argmax':
                 _, a_t = nav_logits.max(1)  # student forcing - argmax
                 a_t = a_t.detach()
+                if 'eqa' in data_type:
+                    for idx in range(batch_size):
+                        if data_type[idx] == 'eqa':
+                            traj[idx]['eqa']['answer'].append(a_t.data.cpu())
+                            traj[idx]['eqa']['scores'].append(nav_logits[idx].data.cpu())
+                            traj[idx]['eqa']['gt'].append(obs[idx]['answer'])
+
+                            _loss = vln_model.criterion(
+                                nav_logits[idx:idx+1],
+                                torch.tensor([obs[idx]['answer']]).cuda()).data.cpu()
+                            traj[idx]['eqa']['loss'].append(
+                                _loss
+                            )
             else:
                 print(feedback)
                 raise NotImplementedError
@@ -748,7 +775,7 @@ def rollout(
             # Determine stop actions
 
             for idx in range(len(a_t)):
-                if a_t[idx] == -100:
+                if a_t[idx] == -100 or data_type[idx] == 'eqa':
                     continue
                 history[idx] += '<hist>'
                 hist_vis[idx].append(nav_outs['fuse_embeds'][idx][a_t[idx]])
@@ -761,11 +788,15 @@ def rollout(
             # Prepare environment action
             cpu_a_t = []
             for i in range(batch_size):
-                if a_t_stop[i] or ended[i] or nav_inputs['no_vp_left'][i] or (t == args.max_action_len - 1):
+                if data_type[i] == 'eqa':
                     cpu_a_t.append(None)
                     just_ended[i] = True
                 else:
-                    cpu_a_t.append(nav_vpids[i][a_t[i]])
+                    if a_t_stop[i] or ended[i] or nav_inputs['no_vp_left'][i] or (t == args.max_action_len - 1):
+                        cpu_a_t.append(None)
+                        just_ended[i] = True
+                    else:
+                        cpu_a_t.append(nav_vpids[i][a_t[i]])
 
             ##### instructions #####
             # TODO
@@ -780,18 +811,23 @@ def rollout(
                         if v['stop'] > stop_score['stop']:
                             stop_score = v
                             stop_node = k
-                    if stop_node is not None and obs[i]['viewpoint'] != stop_node and data_type[i] != 'cvdn':
+                    if stop_node is not None and obs[i]['viewpoint'] != stop_node:
                         traj[i]['path'].append(gmaps[i].graph.path(obs[i]['viewpoint'], stop_node))
 
             # get new observation and update graph
-            obs = []
+            new_obs = []
             for b_i in range(batch_size):
-                obs.append(
-                    r2r_dataloader.dataset.get_obs(
-                        items=[batch_dict['item'][b_i]],
-                        env=envs[b_i]
-                    )[0]
-                )
+                if data_type[b_i] == 'eqa':
+                    new_obs.append(obs[b_i])
+                else:
+                    new_obs.append(
+                        r2r_dataloader.dataset.get_obs(
+                            items=[batch_dict['item'][b_i]],
+                            env=envs[b_i], data_type=data_type[b_i]
+                        )[0]
+                    )
+            obs = new_obs
+
             nav_agent.update_scanvp_cands(obs)
 
             for i, ob in enumerate(obs):
@@ -820,7 +856,21 @@ def merge_dist_results(results):
 def get_results(pred_results, detailed_output=False):
     pred_output = []
     for k, v in pred_results.items():
-        pred_output.append({'instr_id': k, 'trajectory': v['path']})
+        if 'eqa' in k:
+            pred_output.append(
+                {
+                    'instr_id': k,
+                    'trajectory': v['path'],
+                    'eqa': v['eqa']
+                }
+            )
+        else:
+            pred_output.append(
+                {
+                    'instr_id': k,
+                    'trajectory': v['path']
+                }
+            )
     return pred_output
 
 
@@ -898,9 +948,14 @@ def vln_val_one_epoch(
                 if pdata['instr_id'].split('_')[0] == prefix:
                     one_preds.append(pdata)
 
-            score_summary, _ = r2r_dataloader.dataset.eval_metrics(
-                one_preds, logger=logger, data_type=prefix
-            )
+            if prefix == 'eqa':
+                score_summary = r2r_dataloader.dataset.eval_eqa_metrics(
+                    one_preds, logger=logger
+                )
+            else:
+                score_summary, _ = r2r_dataloader.dataset.eval_metrics(
+                    one_preds, logger=logger, data_type=prefix
+                )
 
             if prefix == 'r2r':
                 useful_score_summary = score_summary
@@ -915,17 +970,25 @@ def vln_val_one_epoch(
         if useful_score_summary is not None:
             score_summary = useful_score_summary
 
-        # select model by Success Rate
-        if score_summary['sr'] >= best_val[args.val_split]['sr']:
-            best_val[args.val_split]['spl'] = score_summary['spl']
-            best_val[args.val_split]['sr'] = score_summary['sr']
-            best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
+        if 'sr' in score_summary.keys():
+            # select model by Success Rate
+            if score_summary['sr'] >= best_val[args.val_split]['sr']:
+                best_val[args.val_split]['spl'] = score_summary['spl']
+                best_val[args.val_split]['sr'] = score_summary['sr']
+                best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
 
+                save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+                vln_model.save(epoch, str(save_ckpt_file),
+                               vln_bert_optimizer=vln_optimizer[0],
+                               critic_optimizer=vln_optimizer[1]
+                               )
+        else:
             save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
             vln_model.save(epoch, str(save_ckpt_file),
                            vln_bert_optimizer=vln_optimizer[0],
                            critic_optimizer=vln_optimizer[1]
                            )
+
 
 
 

@@ -8,7 +8,7 @@ Dataset:
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['R2R'] # 'R2R', 'SOON', 'REVERIE', 'CVDN'
+  SOURCE: ['EQA', 'R2R', 'SOON', 'REVERIE', 'CVDN']  # 'R2R', 'SOON', 'REVERIE', 'CVDN'
   SOON:
     DIR: "data/SOON/annotations/duet" # train.json
     SPLIT: {
@@ -53,16 +53,30 @@ Dataset:
     }
 
   EQA:
-    DIR: "data/mp3d/mp3d_eqa_dict.json"
+    # train.json.gz, val.json.gz
+    DIR: "/mnt/petrelfs/zhaolin/vln/nav/features/EQA"
+    SPLIT: {
+      "train": "train",
+      "val_seen": "val",
+      "val_unseen": "val",
+      "test": "val"
+    }
+    Feats: "/mnt/petrelfs/zhaolin/vln/nav/features/EQA/eqa_vit_224_{split}.hdf5"
 
   CVDN:
     DIR: "data/CVDN"
     SPLIT: {
-      "train": "train_enc.json",
-      "val_seen": "val_seen_enc.json",
-      "val_unseen": "val_unseen_enc.json",
-      "test": "test_enc.json"
+      "train": "train.json",
+      "val_seen": "val_seen.json",
+      "val_unseen": "val_unseen.json",
+      "test": "test_cleaned.json"
     }
+#    SPLIT: {
+#      "train": "train_enc.json",
+#      "val_seen": "val_seen_enc.json",
+#      "val_unseen": "val_unseen_enc.json",
+#      "test": "test_enc.json"
+#    }
 
   Img_Features_File_Map: {
     # from HM3D-AutoVLN

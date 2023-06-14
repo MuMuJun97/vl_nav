@@ -114,9 +114,16 @@ def dist_models(args, vln_model: BertVLNModel, language_model=None, logger=None)
         vln_model.critic.to(device_id)
         vln_bert_optimizer = torch.optim.AdamW(vln_model.vln_bert.parameters(), lr=args.lr)
         critic_optimizer = torch.optim.AdamW(vln_model.critic.parameters(), lr=args.lr)
-        vln_optimizer = (vln_bert_optimizer, critic_optimizer)
+
         language_optimizer = None
         lr_scheduler = None
+
+        # TODO : check if a checkpoint exists for this run
+        resume_from_epoch, global_step = check_checkpoint(
+            args, vln_model.vln_bert, vln_bert_optimizer,
+            lr_scheduler, logger, is_duet=True
+        )
+        vln_optimizer = (vln_bert_optimizer, critic_optimizer)
 
         if args.distributed:
             from torch.nn.parallel import DistributedDataParallel as DDP

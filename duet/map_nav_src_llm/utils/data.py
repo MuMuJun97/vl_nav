@@ -22,6 +22,15 @@ class ImageFeaturesDB(object):
                 self._feature_store[key] = ft
         return ft
 
+    def get_eqa_feature(self, split, idx):
+        key = '%s_%s' % (split, idx)
+        if key in self._feature_store:
+            ft = self._feature_store[key]
+        else:
+            with h5py.File(self.img_ft_file, 'r') as f:
+                ft = f[key][...][:, :self.image_feat_size].astype(np.float32)
+                self._feature_store[key] = ft
+        return ft
 
 class ObjectFeatureDB(object):
     def __init__(self, obj_ft_file, obj_feat_size):
