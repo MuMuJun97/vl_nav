@@ -370,6 +370,13 @@ class VLNModel(nn.Module):
         batch = collections.defaultdict(lambda: None, batch)
 
 
+def model_state_to_cpu(model_state):
+    model_state_cpu = type(model_state)()  # ordered dict
+    for key, val in model_state.items():
+        model_state_cpu[key] = val.cpu()
+    return model_state_cpu
+
+
 class BertVLNModel(object):
     """
     @function: VLN-DUET Pipeline with LLMs
@@ -389,9 +396,13 @@ class BertVLNModel(object):
         states = {}
 
         def create_state(name, model, optimizer):
+            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+                model_state = model_state_to_cpu(model.module.state_dict())
+            else:
+                model_state = model.state_dict()
             states[name] = {
                 'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
+                'state_dict': model_state,
                 'optimizer': optimizer.state_dict(),
             }
 

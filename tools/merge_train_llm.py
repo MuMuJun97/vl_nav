@@ -657,7 +657,9 @@ def rollout(
             pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)  # [B, 36, D=768], [B, 36,]
             avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
                               torch.sum(pano_masks, 1, keepdim=True)  # [B, D=768]
-            pano_embeds[~pano_masks] = torch.zeros_like(pano_embeds[~pano_masks]) # For EQA
+            # pano_embeds[~pano_masks] = torch.zeros_like(pano_embeds[~pano_masks])  # For EQA
+            # pano_embeds.masked_fill_(pano_masks.logical_not().unsqueeze(-1), 0.)  # For EQA
+            # pano_embeds[~pano_masks] = torch.clone(torch.zeros_like(pano_embeds[~pano_masks]))
 
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:

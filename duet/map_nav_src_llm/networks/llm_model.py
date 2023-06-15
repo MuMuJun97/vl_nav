@@ -710,6 +710,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
                 batch['view_img_fts'], batch['obj_img_fts'], batch['loc_fts'],
                 batch['nav_types'], batch['view_lens'], batch['obj_lens']
             )
+            pano_embeds.masked_fill_(pano_masks.logical_not().unsqueeze(-1), 0.)
             return pano_embeds, pano_masks
 
         elif mode == 'navigation':

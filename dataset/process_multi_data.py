@@ -376,12 +376,12 @@ def load_eqa_data(anno_dir, anno_file):
         item['question_tokens'] = episode['question']['question_tokens']
         item['answer_token'] = episode['question']['answer_token']
 
-        imgs = []
-        for i in range(5):
-            fname = anno_dir / "{}.{}.jpg".format('%04d' % ep_index, '%03d' % i)
-            assert fname.exists()
-            imgs.append(fname)
-        item['images'] = imgs
+        # imgs = []
+        # for i in range(5):
+        #     fname = anno_dir / "{}.{}.jpg".format('%04d' % ep_index, '%03d' % i)
+        #     assert fname.exists()
+        #     imgs.append(fname)
+        # item['images'] = imgs
         new_data.append(item)
     del episodes
     if debug:

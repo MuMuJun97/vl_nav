@@ -61,10 +61,13 @@ def check_checkpoint(args, model, optimizer, lr_scheduler, logger, is_duet=False
     if os.path.exists(f"{args.run_name}") and args.resume_from_checkpoint is None:
         if is_duet:
             checkpoint_list = glob.glob(f"{args.run_name}/best_val_unseen*")
-            args.resume_from_checkpoint = checkpoint_list[-1]
-            logger.info(
-                f"Found checkpoint {args.resume_from_checkpoint} for \n run_name = {args.run_name}."
-            )
+            if len(checkpoint_list) == 0:
+                logger.info(f"Found no checkpoints for run {args.run_name}.")
+            else:
+                args.resume_from_checkpoint = checkpoint_list[-1]
+                logger.info(
+                    f"Found checkpoint {args.resume_from_checkpoint} for \n run_name = {args.run_name}."
+                )
         else:
             checkpoint_list = glob.glob(f"{args.run_name}/checkpoint_*.pt")
             if len(checkpoint_list) == 0:
@@ -94,6 +97,9 @@ def check_checkpoint(args, model, optimizer, lr_scheduler, logger, is_duet=False
                     )
             model.load_state_dict(update_model_state, strict=False)
             resume_from_epoch = checkpoint["epoch"] + 1
+
+            # optimizer.load_state_dict(checkpoint['optimizer']) if optimizer is not None else None
+
             logger.info("Load epoch: resume from epoch {}".format(resume_from_epoch))
             return resume_from_epoch, global_step
 
