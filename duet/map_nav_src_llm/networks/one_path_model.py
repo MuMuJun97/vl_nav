@@ -733,11 +733,12 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             gmap_embeds = torch.zeros_like(gmap_img_embeds)
             for b_ix in range(len(data_type)):
                 if data_type[b_ix] == 'eqa':
-                    gmap_embeds[b_ix:b_ix+1] = gmap_img_embeds[b_ix:b_ix+1]
+                    gmap_embeds[b_ix:b_ix + 1] = gmap_img_embeds[b_ix:b_ix + 1]
                 else:
-                    gmap_embeds[b_ix:b_ix+1] = gmap_img_embeds[b_ix:b_ix+1] + \
-                                  self.global_encoder.gmap_step_embeddings(gmap_step_ids[b_ix:b_ix+1]) + \
-                                  self.global_encoder.gmap_pos_embeddings(gmap_pos_fts[b_ix:b_ix+1])
+                    gmap_embeds[b_ix:b_ix + 1] = gmap_img_embeds[b_ix:b_ix + 1] + \
+                                                 self.global_encoder.gmap_step_embeddings(
+                                                     gmap_step_ids[b_ix:b_ix + 1]) + \
+                                                 self.global_encoder.gmap_pos_embeddings(gmap_pos_fts[b_ix:b_ix + 1])
 
             if self.global_encoder.sprel_linear is not None:
                 graph_sprels = self.global_encoder.sprel_linear(
@@ -759,10 +760,10 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             vp_embeds = torch.zeros_like(vp_img_embeds)
             for b_ix in range(len(data_type)):
                 if data_type[b_ix] == 'eqa':
-                    vp_embeds[b_ix:b_ix+1] = vp_img_embeds[b_ix:b_ix+1]
+                    vp_embeds[b_ix:b_ix + 1] = vp_img_embeds[b_ix:b_ix + 1]
                 else:
-                    vp_embeds[b_ix:b_ix+1] = vp_img_embeds[b_ix:b_ix+1] \
-                        + self.local_encoder.vp_pos_embeddings(vp_pos_fts[b_ix:b_ix+1])
+                    vp_embeds[b_ix:b_ix + 1] = vp_img_embeds[b_ix:b_ix + 1] \
+                                               + self.local_encoder.vp_pos_embeddings(vp_pos_fts[b_ix:b_ix + 1])
             vp_embeds = self.local_encoder.encoder(vp_embeds, vp_masks)
 
             fuse_weights = torch.sigmoid(self.sap_fuse_linear(
@@ -816,15 +817,18 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
                 max_len = max(self.eqa_ans_dim, gmap_masks.shape[-1])
                 pad_gmap_masks = torch.zeros((gmap_masks.shape[0], max_len), device=gmap_masks.device).bool()
                 pad_fuse_embeds = torch.zeros((fuse_embeds.shape[0], max_len, fuse_embeds.shape[-1]),
-                    device=fuse_embeds.device, dtype=fuse_embeds.dtype)
+                                              device=fuse_embeds.device, dtype=fuse_embeds.dtype)
                 pad_gmap_visited_masks = torch.zeros((gmap_visited_masks.shape[0], max_len),
                                                      device=gmap_visited_masks.device).bool()
                 pad_gmap_visited_masks[:, :gmap_visited_masks.shape[-1]] = gmap_visited_masks
                 for idx in range(len(data_type)):
                     if data_type[idx] == 'eqa':
-                        pad_gmap_masks[idx, :self.eqa_ans_dim] = torch.ones_like(pad_gmap_masks[idx, :self.eqa_ans_dim]).bool()
-                        pad_fuse_embeds[idx, :self.eqa_ans_dim] = torch.cat([fuse_embeds[idx, 1:2]]*self.eqa_ans_dim) + \
-                            self.eqa_embeddings(torch.arange(self.eqa_ans_dim).to(fuse_embeds.device))
+                        pad_gmap_masks[idx, :self.eqa_ans_dim] = torch.ones_like(
+                            pad_gmap_masks[idx, :self.eqa_ans_dim]).bool()
+                        pad_fuse_embeds[idx, :self.eqa_ans_dim] = torch.cat(
+                            [fuse_embeds[idx, 1:2]] * self.eqa_ans_dim) + \
+                                                                  self.eqa_embeddings(torch.arange(self.eqa_ans_dim).to(
+                                                                      fuse_embeds.device))
                     else:
                         pad_gmap_masks[idx, :gmap_masks[idx].shape[-1]] = gmap_masks[idx]
                         pad_fuse_embeds[idx, :fuse_embeds.shape[-2]] = fuse_embeds[idx, :fuse_embeds.shape[-2]]
@@ -897,11 +901,12 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             gmap_embeds = torch.zeros_like(gmap_img_embeds)
             for b_ix in range(len(data_type)):
                 if data_type[b_ix] == 'eqa':
-                    gmap_embeds[b_ix:b_ix+1] = gmap_img_embeds[b_ix:b_ix+1]
+                    gmap_embeds[b_ix:b_ix + 1] = gmap_img_embeds[b_ix:b_ix + 1]
                 else:
-                    gmap_embeds[b_ix:b_ix+1] = gmap_img_embeds[b_ix:b_ix+1] + \
-                                  self.global_encoder.gmap_step_embeddings(gmap_step_ids[b_ix:b_ix+1]) + \
-                                  self.global_encoder.gmap_pos_embeddings(gmap_pos_fts[b_ix:b_ix+1])
+                    gmap_embeds[b_ix:b_ix + 1] = gmap_img_embeds[b_ix:b_ix + 1] + \
+                                                 self.global_encoder.gmap_step_embeddings(
+                                                     gmap_step_ids[b_ix:b_ix + 1]) + \
+                                                 self.global_encoder.gmap_pos_embeddings(gmap_pos_fts[b_ix:b_ix + 1])
 
             if self.global_encoder.sprel_linear is not None:
                 graph_sprels = self.global_encoder.sprel_linear(
@@ -923,10 +928,10 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             vp_embeds = torch.zeros_like(vp_img_embeds)
             for b_ix in range(len(data_type)):
                 if data_type[b_ix] == 'eqa':
-                    vp_embeds[b_ix:b_ix+1] = vp_img_embeds[b_ix:b_ix+1]
+                    vp_embeds[b_ix:b_ix + 1] = vp_img_embeds[b_ix:b_ix + 1]
                 else:
-                    vp_embeds[b_ix:b_ix+1] = vp_img_embeds[b_ix:b_ix+1] \
-                        + self.local_encoder.vp_pos_embeddings(vp_pos_fts[b_ix:b_ix+1])
+                    vp_embeds[b_ix:b_ix + 1] = vp_img_embeds[b_ix:b_ix + 1] \
+                                               + self.local_encoder.vp_pos_embeddings(vp_pos_fts[b_ix:b_ix + 1])
             vp_embeds = self.local_encoder.encoder(vp_embeds, vp_masks)
 
             fuse_weights = torch.sigmoid(self.sap_fuse_linear(
@@ -980,15 +985,18 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
                 max_len = max(self.eqa_ans_dim, gmap_masks.shape[-1])
                 pad_gmap_masks = torch.zeros((gmap_masks.shape[0], max_len), device=gmap_masks.device).bool()
                 pad_fuse_embeds = torch.zeros((fuse_embeds.shape[0], max_len, fuse_embeds.shape[-1]),
-                    device=fuse_embeds.device, dtype=fuse_embeds.dtype)
+                                              device=fuse_embeds.device, dtype=fuse_embeds.dtype)
                 pad_gmap_visited_masks = torch.zeros((gmap_visited_masks.shape[0], max_len),
                                                      device=gmap_visited_masks.device).bool()
                 pad_gmap_visited_masks[:, :gmap_visited_masks.shape[-1]] = gmap_visited_masks
                 for idx in range(len(data_type)):
                     if data_type[idx] == 'eqa':
-                        pad_gmap_masks[idx, :self.eqa_ans_dim] = torch.ones_like(pad_gmap_masks[idx, :self.eqa_ans_dim]).bool()
-                        pad_fuse_embeds[idx, :self.eqa_ans_dim] = torch.cat([fuse_embeds[idx, 1:2]]*self.eqa_ans_dim) + \
-                            self.eqa_embeddings(torch.arange(self.eqa_ans_dim).to(fuse_embeds.device))
+                        pad_gmap_masks[idx, :self.eqa_ans_dim] = torch.ones_like(
+                            pad_gmap_masks[idx, :self.eqa_ans_dim]).bool()
+                        pad_fuse_embeds[idx, :self.eqa_ans_dim] = torch.cat(
+                            [fuse_embeds[idx, 1:2]] * self.eqa_ans_dim) + \
+                                                                  self.eqa_embeddings(torch.arange(self.eqa_ans_dim).to(
+                                                                      fuse_embeds.device))
                     else:
                         pad_gmap_masks[idx, :gmap_masks[idx].shape[-1]] = gmap_masks[idx]
                         pad_fuse_embeds[idx, :fuse_embeds.shape[-2]] = fuse_embeds[idx, :fuse_embeds.shape[-2]]
@@ -1022,28 +1030,29 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         elif mode == 'one_path':
             data_type = batch['data_type']
             all_text = batch['all_input_text']
+            text_input, truncation = self.lang_model.tokenize(all_text)
+            if truncation:
+                all_input_text = []
+                batch['history'] = {i: batch['history'][i] for i in range(5)}
+                for i, instr in enumerate(batch['instructions']):
+                    input_text = "{instruction}".format(instruction=instr)
+                    for t, item in batch['history'].items():
+                        input_text += item[t]['cand_text'][i]
+                    all_input_text.append(input_text)
+                text_input, _ = self.lang_model.tokenize(all_input_text)
+
             fuse_embeds = []
             cand_masks = []
             for t, item in batch['history'].items():
                 fuse_embeds.append(item[t]['fuse_embeds'])
                 cand_masks.append(item[t]['cand_masks'])
+
             fuse_embeds = torch.cat(fuse_embeds, dim=1)
             cand_masks = torch.cat(cand_masks, dim=-1)
 
-            text_input, truncation = self.lang_model.tokenize(all_text)
             text_input = text_input.to(fuse_embeds.device)
-            if truncation:
-                output_dict = {
-                    'ml_loss': None,
-                    'nav_probs': None,
-                    'truncation': True,
-                    'nav_loss_probs': None,
-                    'cnt_loss': None,
-                }
-                return output_dict
-            else:
-                cand_embeds = fuse_embeds[cand_masks]
 
+            cand_embeds = fuse_embeds[cand_masks]
             loss, logits, hidden_states, cand_locations = self.lang_model(
                 input_ids=text_input['input_ids'],
                 attention_mask=text_input['attention_mask'],
@@ -1201,6 +1210,7 @@ class BertVLNModel(object):
     """
     @function: VLN-DUET Pipeline with LLMs
     """
+
     def __init__(self, args, logger=None):
         super().__init__()
         self.args = args

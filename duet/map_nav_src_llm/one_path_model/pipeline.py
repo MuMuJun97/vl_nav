@@ -773,7 +773,8 @@ def rollout(
         'all_input_text': all_input_text,
         'data_type': data_type,
         'history': history,
-        'train_ml': train_ml
+        'train_ml': train_ml,
+        'instructions': instructions,
     }
 
     history_outs = vln_model.vln_bert('one_path', input_dict)
@@ -1020,7 +1021,8 @@ def rollout_sample(
         'all_input_text': all_input_text,
         'data_type': data_type,
         'history': history,
-        'train_ml': train_ml
+        'train_ml': train_ml,
+        'instructions': instructions,
     }
 
     history_outs = vln_model.vln_bert('one_path', input_dict)
