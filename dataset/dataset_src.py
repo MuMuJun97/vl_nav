@@ -723,6 +723,10 @@ class SrcDataset(torch_data.Dataset):
                 'item': item,
                 # 'instr': instr,
                 'data_type': data_type,
+                'scanIds': scanIds,
+                'viewpointIds': viewpointIds,
+                'headings': headings,
+                'answer': self.answer_vocab.word2idx(item['answer_text'])
             }
             return data_dict
 
@@ -773,6 +777,10 @@ class SrcDataset(torch_data.Dataset):
             'item': item,
             # 'instr': instr,
             'data_type': data_type,
+            'scanIds': scanIds,
+            'viewpointIds': viewpointIds,
+            'headings': headings,
+            'answer': None,
         }
 
         return data_dict

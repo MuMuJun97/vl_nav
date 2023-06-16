@@ -5,6 +5,7 @@ from tqdm import tqdm
 import glob
 import os
 
+
 def get_cast_dtype(precision: str):
     cast_dtype = None
     if precision == "bf16":
@@ -23,6 +24,7 @@ def get_autocast(precision):
     else:
         return suppress
 
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -40,6 +42,7 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
 
 def get_grouped_params(model,args):
     params_with_wd, params_without_wd = [], []
@@ -101,7 +104,7 @@ def check_checkpoint(args, model, optimizer, lr_scheduler, logger, is_duet=False
             # optimizer.load_state_dict(checkpoint['optimizer']) if optimizer is not None else None
 
             logger.info("Load epoch: resume from epoch {}".format(resume_from_epoch))
-            return resume_from_epoch, global_step
+        return resume_from_epoch, global_step
 
     else:
         # TODO : resume from checkpoint
@@ -136,6 +139,7 @@ def model_state_to_cpu(model_state):
         model_state_cpu[key] = val.cpu()
     return model_state_cpu
 
+
 def get_checkpoint(model, del_grad=True):
     if model is not None:
         if isinstance(model, torch.nn.parallel.DistributedDataParallel):
@@ -155,6 +159,7 @@ def get_checkpoint(model, del_grad=True):
         state_dict = None
 
     return state_dict
+
 
 def save_checkpoint(args, epoch, ddp_model, optimizer, lr_scheduler, logger, global_step, min_val_loss):
     if args.rank == 0:

@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 import json
@@ -7,14 +8,12 @@ import math
 from pathlib import Path
 import torch.nn as nn
 from tqdm import tqdm
-from models.merge_model_llm import BertVLNModel
+from duet.map_nav_src_llm.networks.one_path_model import BertVLNModel, prompt
 from torch.nn.utils.rnn import pad_sequence
 from duet.map_nav_src_llm.utils.ops import pad_tensors, gen_seq_masks
 from collections import defaultdict
-# from duet.map_nav_src.networks.graph_utils import GraphMap
 from duet.map_nav_src_llm.networks.graph_utils import calculate_vp_rel_pos_fts, get_angle_fts
 from duet.map_nav_src_llm.networks.ops import pad_tensors_wgrad
-# from duet.map_nav_src_llm.r2r.eval_utils import cal_dtw
 from duet.map_nav_src_llm.utils.distributed import all_gather
 from contextlib import nullcontext
 from networks.graph_utils import GraphMap
@@ -30,6 +29,8 @@ class Metrics(object):
 
     @property
     def average(self):
+        if self.num == 0:
+            return 0
         return self.total / self.num
 
 
@@ -43,19 +44,20 @@ class NavigationAgent(object):
 
     def get_instruction(self, item, data_type):
         if data_type == 'r2r':
-            return 'Travel following the instruction, you can not ask for help. Instruction: ' \
+            return 'Follow a given instruction to navigate the shortest path in an indoor environment. Instruction: ' \
                 + item['instruction']
         elif data_type == 'soon':
-            return 'Find the described target, you can not ask for help. Target: ' \
+            return 'Navigate to the location of an object described by a given instruction ' \
+                   'in the shortest steps in an indoor environment. Instruction: ' \
                 + item['instruction']
         elif data_type == 'reverie':
-            return 'Go to the location to complete the given task, you can not ask for help. Task: ' \
+            return 'Navigate to a target location following a given instruction in an indoor environment. Instruction: ' \
                 + item['instruction']
         elif data_type == 'eqa':
-            return 'Explore the scene and answer the question, you can not ask for help. Question: ' \
-                          + item['instruction']
+            return 'Answer a given question based on what you see in an indoor environment. Question: ' \
+                + item['instruction']
         elif data_type == 'cvdn':
-            return 'Find the described target, you can ask for help. Target: ' \
+            return 'Navigate to the location of a target object in an indoor environment based on a dialogue: ' \
                 + item['instruction']
 
     def update_scanvp_cands(self, obs):
@@ -524,44 +526,54 @@ def vln_train_one_epoch(
             batch_dict = next(dataloader_it)
             logger.info("\n[Dataloader] new iters")
 
-        ml_loss, _ = rollout(
+        ml_loss, hist_infos = rollout(
             args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
             train_ml=train_ml, train_rl=train_rl, nav_agent=nav_agent, vln_model=vln_model,
             entropy_metric=entropy_metric,
         )
-        if train_ml is not None:
-            iter_loss += ml_loss
-            loss_metric.accumulate(ml_loss.item())
 
-        #################### dagger training ####################
-        feedback, train_ml, train_rl = 'sample', 1, False
-
-        # reset env
-        try:
-            batch_dict = next(dataloader_it)
-        except StopIteration:
-            dataloader_it = iter(r2r_dataloader)
-            batch_dict = next(dataloader_it)
-            logger.info("[Dataloader] new iters")
-
-        sample_ml_loss, _ = rollout(
-            args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
-            train_ml=train_ml, train_rl=train_rl, nav_agent=nav_agent, vln_model=vln_model,
-            entropy_metric=entropy_metric,
-        )
-        if train_ml is not None:
-            iter_loss += sample_ml_loss
-            loss_metric.accumulate(sample_ml_loss.item())
-
-        if args.enable_language_model:
-            raise NotImplementedError
+        if hist_infos is None:
+            pass
         else:
-            torch.nn.utils.clip_grad_norm_(vln_model.vln_bert.parameters(), 40.)
-            vln_bert_optimizer.step()
-            critic_optimizer.step()
+            if train_ml is not None:
+                iter_loss += ml_loss
+                loss_metric.accumulate(ml_loss.item())
+
+            #################### dagger training ####################
+            feedback, train_ml, train_rl = 'sample', 1, False
+
+            for b_i in range(len(batch_dict['env'])):
+                scanIds = batch_dict['scanIds'][b_i]
+                viewpointIds = batch_dict['viewpointIds'][b_i]
+                headings = batch_dict['headings'][b_i]
+                batch_dict['env'][b_i].newEpisodes(scanIds, viewpointIds, headings)
+                observations = r2r_dataloader.dataset.get_obs(
+                    items=[batch_dict['item'][b_i]],
+                    env=batch_dict['env'][b_i],
+                    data_type=batch_dict['data_type'][b_i]
+                )[0]
+                if batch_dict['data_type'][b_i] == 'eqa':
+                    observations['answer'] = batch_dict['answer'][b_i]
+                batch_dict['observations'][b_i] = observations
+
+            sample_ml_loss, _ = rollout_sample(
+                args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
+                train_ml=train_ml, train_rl=train_rl, nav_agent=nav_agent, vln_model=vln_model,
+                entropy_metric=entropy_metric, hist_infos=hist_infos
+            )
+
+            if train_ml is not None:
+                iter_loss += sample_ml_loss
+                loss_metric.accumulate(sample_ml_loss.item())
+
+            if args.enable_language_model:
+                raise NotImplementedError
+            else:
+                torch.nn.utils.clip_grad_norm_(vln_model.vln_bert.parameters(), 40.)
+                vln_bert_optimizer.step()
+                critic_optimizer.step()
 
         if args.rank == 0:
-            # pbar.update()
             pbar.set_postfix(dict(
                 loss=loss_metric.average,
                 entropy=entropy_metric.average,
@@ -569,6 +581,612 @@ def vln_train_one_epoch(
 
 
 def rollout(
+        args,
+        r2r_dataloader,
+        batch_dict,
+        feedback,
+        train_ml,
+        train_rl,
+        nav_agent: NavigationAgent,
+        vln_model: BertVLNModel,
+        entropy_metric,
+        do_backward=False,
+        is_val=False,  # in validation mode
+):
+    data_type = batch_dict['data_type']
+    obs = batch_dict['observations']
+    envs = batch_dict['env']
+
+    if 'cvdn' in data_type or 'soon' in data_type:
+        max_action_len = 20
+    else:
+        max_action_len = args.max_action_len  # 15
+
+    nav_agent.update_scanvp_cands(obs)
+    batch_size = len(obs)
+
+    # build graph: keep the start viewpoint
+    gmaps = [GraphMap(ob['viewpoint']) for ob in obs]
+    for i, ob in enumerate(obs):
+        gmaps[i].update_graph(ob)
+
+    # Record the navigation path
+    traj = [{
+        'instr_id': ob['instr_id'],
+        'path': [[ob['viewpoint']]],
+        'details': {},
+        'eqa': defaultdict(list),
+    } for ob in obs]
+
+    # Initialization the tracking state
+    ended = np.array([False] * batch_size)
+    just_ended = np.array([False] * batch_size)
+
+    instructions = nav_agent.language_variable(obs, data_type=batch_dict['data_type'])
+
+    # Init the logs
+    entropys = []
+    ml_loss = 0.
+    cnt_loss = 0.
+    flag = False
+    history = {}
+
+    for t in range(max_action_len):
+        if isinstance(vln_model.vln_bert, torch.nn.parallel.DistributedDataParallel):
+            # multi-gpu
+            if ended.all() or t == max_action_len - 1:
+                flag = True
+                context = nullcontext
+            else:
+                context = vln_model.vln_bert.no_sync
+        else:
+            # single-gpu
+            if ended.all() or t == max_action_len - 1:
+                break
+                context = nullcontext
+            else:
+                context = nullcontext
+
+        with context():
+            for i, gmap in enumerate(gmaps):
+                if not ended[i]:
+                    gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
+
+            # graph representation
+            pano_inputs = nav_agent.panorama_feature_variable_object(obs)
+            pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)  # [B, 36, D=768], [B, 36,]
+            avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
+                              torch.sum(pano_masks, 1, keepdim=True)  # [B, D=768]
+
+            for i, gmap in enumerate(gmaps):
+                if not ended[i]:
+                    # update visited node
+                    i_vp = obs[i]['viewpoint']
+                    update_avg_pana_embeds = avg_pano_embeds[i].detach()  # update average features for gmap.
+                    gmap.update_node_embed(i_vp, update_avg_pana_embeds, rewrite=True)
+                    # update unvisited nodes
+                    for j, i_cand_vp in enumerate(pano_inputs['cand_vpids'][i]):
+                        if not gmap.graph.visited(i_cand_vp):
+                            update_pano_embeds = pano_embeds[i, j].detach()
+                            gmap.update_node_embed(i_cand_vp, update_pano_embeds)
+
+            # navigation policy
+            nav_inputs = nav_agent.nav_gmap_variable(obs, gmaps)
+            nav_inputs.update(
+                nav_agent.nav_vp_variable(
+                    obs, gmaps, pano_embeds, pano_inputs['cand_vpids'],
+                    pano_inputs['view_lens'], pano_inputs['nav_types'],
+                )
+            )
+            nav_inputs.update({
+                'txt_embeds': None,
+                'txt_masks': None,
+                'data_type': data_type,
+                'step': t,
+            })
+
+            nav_outs = vln_model.vln_bert('navigation', nav_inputs)
+
+            nav_vpids = nav_inputs['gmap_vpids']
+
+            # Imitation Learning
+            if train_ml is not None or feedback == 'gt':
+                # Supervised training
+                imitation_learning = feedback == 'teacher'
+                nav_targets = nav_agent.teacher_action_r4r(
+                    obs, nav_vpids, ended,
+                    visited_masks=nav_inputs['gmap_visited_masks'],
+                    imitation_learning=imitation_learning, t=t, traj=traj
+                )
+                if 'eqa' in data_type:
+                    for idx in range(batch_size):
+                        # if data_type[idx] == 'eqa' and nav_targets[idx] != nav_agent.args.ignoreid:
+                        if data_type[idx] == 'eqa':
+                            nav_targets[idx] = torch.tensor([obs[idx]['answer']], device=nav_targets.device)
+                nav_outs[t].update({
+                    'nav_targets': nav_targets
+                })
+
+            # Determinate the next navigation viewpoint
+            if feedback == 'teacher':  # imitation learning
+                a_t = nav_targets  # teacher forcing
+            else:
+                print(feedback)
+                raise NotImplementedError
+
+            if feedback == 'teacher' or feedback == 'sample':  # in training
+                a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
+            else:
+                a_t_stop = a_t == 0
+
+            # Prepare environment action
+            cpu_a_t = []
+            for i in range(batch_size):
+                if data_type[i] == 'eqa':
+                    cpu_a_t.append(None)
+                    just_ended[i] = True
+                else:
+                    if a_t_stop[i] or ended[i] or nav_inputs['no_vp_left'][i] or (t == args.max_action_len - 1):
+                        cpu_a_t.append(None)
+                        just_ended[i] = True
+                    else:
+                        cpu_a_t.append(nav_vpids[i][a_t[i]])
+
+            history[t] = nav_outs
+
+            # Make action and get the new state
+            nav_agent.make_equiv_action(cpu_a_t, gmaps, obs, traj=traj, env=envs)
+
+            # get new observation and update graph
+            new_obs = []
+            for b_i in range(batch_size):
+                if data_type[b_i] == 'eqa':
+                    new_obs.append(obs[b_i])
+                else:
+                    new_obs.append(
+                        r2r_dataloader.dataset.get_obs(
+                            items=[batch_dict['item'][b_i]],
+                            env=envs[b_i], data_type=data_type[b_i]
+                        )[0]
+                    )
+            obs = new_obs
+
+            nav_agent.update_scanvp_cands(obs)
+
+            for i, ob in enumerate(obs):
+                if not ended[i]:
+                    gmaps[i].update_graph(ob)
+
+            ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
+
+            if flag:
+                break
+
+    # create instructions
+    all_input_text = []
+    for i, instr in enumerate(instructions):
+        input_text = "{instruction}".format(instruction=instr)
+        for t, item in history.items():
+            input_text += item[t]['cand_text'][i]
+        all_input_text.append(input_text)
+    input_dict = {
+        'all_input_text': all_input_text,
+        'data_type': data_type,
+        'history': history,
+        'train_ml': train_ml
+    }
+
+    history_outs = vln_model.vln_bert('one_path', input_dict)
+    truncation = history_outs['truncation']
+    if truncation:
+        # ml_loss, _ = rollout(
+        #     args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
+        #     train_ml=train_ml, train_rl=train_rl, nav_agent=nav_agent, vln_model=vln_model,
+        #     entropy_metric=entropy_metric,
+        # )
+        return torch.tensor(0.).cuda(), None
+    else:
+        nav_probs = history_outs['nav_probs']
+        nav_loss = history_outs['nav_loss']
+        ml_loss = history_outs['ml_loss']
+        cnt_loss = history_outs['cnt_loss']
+        cnt_loss.backward()
+        return ml_loss, {'hist_nav_probs': nav_probs, 'hist_nav_loss': nav_loss}
+
+
+def rollout_sample(
+        args,
+        r2r_dataloader,
+        batch_dict,
+        feedback,
+        train_ml,
+        train_rl,
+        nav_agent: NavigationAgent,
+        vln_model: BertVLNModel,
+        entropy_metric,
+        do_backward=False,
+        is_val=False,  # in validation mode
+        hist_infos=None,
+):
+    data_type = batch_dict['data_type']
+    obs = batch_dict['observations']
+    envs = batch_dict['env']
+
+    if 'cvdn' in data_type or 'soon' in data_type:
+        max_action_len = 20
+    else:
+        max_action_len = args.max_action_len  # 15
+
+    nav_agent.update_scanvp_cands(obs)
+    batch_size = len(obs)
+
+    # build graph: keep the start viewpoint
+    gmaps = [GraphMap(ob['viewpoint']) for ob in obs]
+    for i, ob in enumerate(obs):
+        gmaps[i].update_graph(ob)
+
+    # Record the navigation path
+    traj = [{
+        'instr_id': ob['instr_id'],
+        'path': [[ob['viewpoint']]],
+        'details': {},
+        'eqa': defaultdict(list),
+    } for ob in obs]
+
+    # Initialization the tracking state
+    ended = np.array([False] * batch_size)
+    just_ended = np.array([False] * batch_size)
+
+    instructions = nav_agent.language_variable(obs, data_type=batch_dict['data_type'])
+
+    # Init the logs
+    entropys = []
+    ml_loss = 0.
+    cnt_loss = 0.
+    flag = False
+    history = {}
+
+    for t in range(max_action_len):
+        if isinstance(vln_model.vln_bert, torch.nn.parallel.DistributedDataParallel):
+            # multi-gpu
+            if ended.all() or t == max_action_len - 1:
+                flag = True
+                context = nullcontext
+            else:
+                context = vln_model.vln_bert.no_sync
+        else:
+            # single-gpu
+            if ended.all() or t == max_action_len - 1:
+                break
+                context = nullcontext
+            else:
+                context = nullcontext
+
+        with context():
+            for i, gmap in enumerate(gmaps):
+                if not ended[i]:
+                    gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
+
+            # graph representation
+            pano_inputs = nav_agent.panorama_feature_variable_object(obs)
+            pano_embeds, pano_masks = vln_model.vln_bert('panorama', pano_inputs)  # [B, 36, D=768], [B, 36,]
+            avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
+                              torch.sum(pano_masks, 1, keepdim=True)  # [B, D=768]
+
+            for i, gmap in enumerate(gmaps):
+                if not ended[i]:
+                    # update visited node
+                    i_vp = obs[i]['viewpoint']
+                    update_avg_pana_embeds = avg_pano_embeds[i].detach()  # update average features for gmap.
+                    gmap.update_node_embed(i_vp, update_avg_pana_embeds, rewrite=True)
+                    # update unvisited nodes
+                    for j, i_cand_vp in enumerate(pano_inputs['cand_vpids'][i]):
+                        if not gmap.graph.visited(i_cand_vp):
+                            update_pano_embeds = pano_embeds[i, j].detach()
+                            gmap.update_node_embed(i_cand_vp, update_pano_embeds)
+
+            # navigation policy
+            nav_inputs = nav_agent.nav_gmap_variable(obs, gmaps)
+            nav_inputs.update(
+                nav_agent.nav_vp_variable(
+                    obs, gmaps, pano_embeds, pano_inputs['cand_vpids'],
+                    pano_inputs['view_lens'], pano_inputs['nav_types'],
+                )
+            )
+            nav_inputs.update({
+                'txt_embeds': None,
+                'txt_masks': None,
+                'data_type': data_type,
+                'step': t,
+            })
+
+            nav_outs = vln_model.vln_bert('navigation', nav_inputs)
+
+            nav_vpids = nav_inputs['gmap_vpids']
+
+            # Imitation Learning
+            if train_ml is not None or feedback == 'gt':
+                # Supervised training
+                imitation_learning = feedback == 'teacher'
+                nav_targets = nav_agent.teacher_action_r4r(
+                    obs, nav_vpids, ended,
+                    visited_masks=nav_inputs['gmap_visited_masks'],
+                    imitation_learning=imitation_learning, t=t, traj=traj
+                )
+                if 'eqa' in data_type:
+                    for idx in range(batch_size):
+                        # if data_type[idx] == 'eqa' and nav_targets[idx] != nav_agent.args.ignoreid:
+                        if data_type[idx] == 'eqa':
+                            nav_targets[idx] = torch.tensor([obs[idx]['answer']], device=nav_targets.device)
+                nav_outs[t].update({
+                    'nav_targets': nav_targets
+                })
+
+            # Determinate the next navigation viewpoint
+            if feedback == 'sample':  # imitation learning
+                fuse_embeds = nav_outs[t]['fuse_embeds']
+                cand_masks = nav_outs[t]['cand_masks']
+                gmap_visited_masks = nav_outs[t]['gmap_visited_masks']
+                fuse_logits = torch.zeros((fuse_embeds.shape[0], fuse_embeds.shape[1])).to(
+                    fuse_embeds.device)
+                fuse_logits.masked_fill_(cand_masks.logical_not(), -float('inf'))
+                fuse_logits.masked_fill_(gmap_visited_masks, -float('inf'))
+
+                if t+1 > len(hist_infos['hist_nav_probs']):
+                    for b_i in range(batch_size):
+                        if nav_targets[b_i] == -100:
+                            continue
+                        else:
+                            fuse_logits[b_i, nav_targets[b_i]] = t+1-len(hist_infos['hist_nav_probs'])
+                else:
+                    try:
+                        for b_i in range(batch_size):
+                            if nav_targets[b_i] == -100:
+                                continue
+                            elif t >= len(obs[b_i]['gt_path']):
+                                fuse_logits[b_i, nav_targets[b_i]] = 1. / (hist_infos['hist_nav_loss'][t][b_i] + 1e-2)
+                            elif obs[b_i]['viewpoint'] == obs[b_i]['gt_path'][t] and \
+                                    fuse_logits.shape[-1] == hist_infos['hist_nav_probs'][t].shape[-1]:
+                                fuse_logits[b_i] = hist_infos['hist_nav_probs'][t][b_i]
+                            else:
+                                fuse_logits[b_i, nav_targets[b_i]] = 1. / (hist_infos['hist_nav_loss'][t][b_i] + 1e-2)
+                    except Exception as e:
+                        print(e)
+                nav_probs = torch.softmax(fuse_logits, 1)
+                c = torch.distributions.Categorical(nav_probs.float())
+                entropy_metric.accumulate(c.entropy().sum().item())  # For log
+                entropys.append(c.entropy())  # For optimization
+                a_t = c.sample().detach()
+            else:
+                print(feedback)
+                raise NotImplementedError
+
+            if feedback == 'teacher' or feedback == 'sample':  # in training
+                a_t_stop = [ob['viewpoint'] == ob['gt_path'][-1] for ob in obs]
+            else:
+                a_t_stop = a_t == 0
+
+            # Prepare environment action
+            cpu_a_t = []
+            for i in range(batch_size):
+                if data_type[i] == 'eqa':
+                    cpu_a_t.append(None)
+                    just_ended[i] = True
+                else:
+                    if a_t_stop[i] or ended[i] or nav_inputs['no_vp_left'][i] or (t == args.max_action_len - 1):
+                        cpu_a_t.append(None)
+                        just_ended[i] = True
+                    else:
+                        cpu_a_t.append(nav_vpids[i][a_t[i]])
+
+            history[t] = nav_outs
+
+            # Make action and get the new state
+            nav_agent.make_equiv_action(cpu_a_t, gmaps, obs, traj=traj, env=envs)
+
+            # get new observation and update graph
+            new_obs = []
+            for b_i in range(batch_size):
+                if data_type[b_i] == 'eqa':
+                    new_obs.append(obs[b_i])
+                else:
+                    new_obs.append(
+                        r2r_dataloader.dataset.get_obs(
+                            items=[batch_dict['item'][b_i]],
+                            env=envs[b_i], data_type=data_type[b_i]
+                        )[0]
+                    )
+            obs = new_obs
+
+            nav_agent.update_scanvp_cands(obs)
+
+            for i, ob in enumerate(obs):
+                if not ended[i]:
+                    gmaps[i].update_graph(ob)
+
+            ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
+
+            if flag:
+                break
+
+    # create instructions
+    all_input_text = []
+    for i, instr in enumerate(instructions):
+        input_text = "{instruction}".format(instruction=instr)
+        for t, item in history.items():
+            input_text += item[t]['cand_text'][i]
+        all_input_text.append(input_text)
+    input_dict = {
+        'all_input_text': all_input_text,
+        'data_type': data_type,
+        'history': history,
+        'train_ml': train_ml
+    }
+
+    history_outs = vln_model.vln_bert('one_path', input_dict)
+    truncation = history_outs['truncation']
+
+    if truncation:
+        # ml_loss, _ = rollout(
+        #     args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
+        #     train_ml=train_ml, train_rl=train_rl, nav_agent=nav_agent, vln_model=vln_model,
+        #     entropy_metric=entropy_metric,
+        # )
+        return torch.tensor(0.).cuda(), None
+    else:
+        ml_loss = history_outs['ml_loss']
+        cnt_loss = history_outs['cnt_loss']
+        cnt_loss.backward()
+        return ml_loss, None
+
+
+def merge_dist_results(results):
+    outs = []
+    for res in results:
+        outs.extend(res)
+    return outs
+
+
+def get_results(pred_results, detailed_output=False):
+    pred_output = []
+    for k, v in pred_results.items():
+        if 'eqa' in k:
+            pred_output.append(
+                {
+                    'instr_id': k,
+                    'trajectory': v['path'],
+                    'eqa': v['eqa']
+                }
+            )
+        else:
+            pred_output.append(
+                {
+                    'instr_id': k,
+                    'trajectory': v['path']
+                }
+            )
+    return pred_output
+
+
+@torch.no_grad()
+def vln_val_one_epoch(
+        args,
+        vln_model: BertVLNModel,
+        vln_optimizer,
+        language_model,
+        language_optimizer,
+        r2r_dataloader,
+        epoch,
+        nav_agent: NavigationAgent,
+        logger,
+        best_val,
+        lr_scheduler=None,
+        only_inference=False,
+):
+    feedback = 'argmax'
+    use_dropout = False
+    results = {}
+    entropy_metric = Metrics()
+
+    if args.enable_language_model:
+        vln_model.eval()
+        language_model.eval()
+    else:
+        vln_model.vln_bert.eval()
+        vln_model.critic.eval()
+
+    pbar = tqdm(
+        range(len(r2r_dataloader)),
+        disable=args.rank != 0,
+        total=len(r2r_dataloader),
+        initial=0,
+        desc="validation: ",
+    )
+    dataloader_it = iter(r2r_dataloader)
+
+    # We rely on env showing the entire batch before repeating anything
+    looped = False
+
+    for num_steps in pbar:
+        # reset env
+        batch_dict = next(dataloader_it)
+
+        ml_loss, traj = rollout_raw(
+            args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
+            train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model,
+            entropy_metric=entropy_metric, is_val=True
+        )
+
+        for s_traj in traj:
+            if s_traj['instr_id'] in results:
+                looped = True
+            else:
+                ml_loss = 0
+                results[s_traj['instr_id']] = s_traj
+
+        if looped:
+            break
+
+    # [MULTI-GPU] gather all prediction results from ALL GPU
+    preds = get_results(results)
+    all_preds = all_gather(preds)
+    all_preds = merge_dist_results(all_preds)
+
+    loss_str = "\n[Eval] {} epoch {}\n".format(args.val_split, epoch)
+    if args.rank == 0:
+        multi_prefixs = set([pdata['instr_id'].split('_')[0] for pdata in all_preds])
+        useful_score_summary = None
+        for prefix in multi_prefixs:
+            one_preds = []
+            for pdata in all_preds:
+                if pdata['instr_id'].split('_')[0] == prefix:
+                    one_preds.append(pdata)
+
+            if prefix == 'eqa':
+                score_summary = r2r_dataloader.dataset.eval_eqa_metrics(
+                    one_preds, logger=logger
+                )
+            else:
+                score_summary, _ = r2r_dataloader.dataset.eval_metrics(
+                    one_preds, logger=logger, data_type=prefix
+                )
+
+            if prefix == 'r2r':
+                useful_score_summary = score_summary
+            loss_str += "\n [Eval] dataset=[{}] \n".format(prefix)
+            for metric, val in score_summary.items():
+                if metric == 'sr':
+                    loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
+                else:
+                    loss_str += ', %s: %.2f' % (metric, val)
+
+        logger.info(loss_str)
+        if useful_score_summary is not None:
+            score_summary = useful_score_summary
+
+        if 'sr' in score_summary.keys():
+            # select model by Success Rate
+            if score_summary['sr'] >= best_val[args.val_split]['sr']:
+                best_val[args.val_split]['spl'] = score_summary['spl']
+                best_val[args.val_split]['sr'] = score_summary['sr']
+                best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
+
+                save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+                if not only_inference:
+                    vln_model.save(epoch, str(save_ckpt_file),
+                                   vln_bert_optimizer=vln_optimizer[0],
+                                   critic_optimizer=vln_optimizer[1]
+                                   )
+        else:
+            save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+            if not only_inference:
+                vln_model.save(epoch, str(save_ckpt_file),
+                               vln_bert_optimizer=vln_optimizer[0],
+                               critic_optimizer=vln_optimizer[1]
+                               )
+
+
+def rollout_raw(
         args,
         r2r_dataloader,
         batch_dict,
@@ -680,7 +1298,7 @@ def rollout(
                 'data_type': data_type
             })
 
-            nav_outs = vln_model.vln_bert('navigation', nav_inputs)
+            nav_outs = vln_model.vln_bert('navigation_raw', nav_inputs)
 
             # dynamic fusion
             nav_logits = nav_outs['fuse_logits']
@@ -745,6 +1363,8 @@ def rollout(
             else:
                 print(feedback)
                 raise NotImplementedError
+
+            # Determine stop actions
 
             for idx in range(len(a_t)):
                 if a_t[idx] == -100 or data_type[idx] == 'eqa':
@@ -812,154 +1432,3 @@ def rollout(
                 break
 
     return ml_loss, traj
-
-
-def merge_dist_results(results):
-    outs = []
-    for res in results:
-        outs.extend(res)
-    return outs
-
-
-def get_results(pred_results, detailed_output=False):
-    pred_output = []
-    for k, v in pred_results.items():
-        if 'eqa' in k:
-            pred_output.append(
-                {
-                    'instr_id': k,
-                    'trajectory': v['path'],
-                    'eqa': v['eqa']
-                }
-            )
-        else:
-            pred_output.append(
-                {
-                    'instr_id': k,
-                    'trajectory': v['path']
-                }
-            )
-    return pred_output
-
-
-@torch.no_grad()
-def vln_val_one_epoch(
-        args,
-        vln_model: BertVLNModel,
-        vln_optimizer,
-        language_model,
-        language_optimizer,
-        r2r_dataloader,
-        epoch,
-        nav_agent: NavigationAgent,
-        logger,
-        best_val,
-        lr_scheduler=None,
-        only_inference=False,
-):
-    feedback = 'argmax'
-    use_dropout = False
-    results = {}
-    entropy_metric = Metrics()
-
-    if args.enable_language_model:
-        vln_model.eval()
-        language_model.eval()
-    else:
-        vln_model.vln_bert.eval()
-        vln_model.critic.eval()
-
-    pbar = tqdm(
-        # enumerate(r2r_dataloader),
-        range(len(r2r_dataloader)),
-        disable=args.rank != 0,
-        total=len(r2r_dataloader),
-        initial=0,
-        desc="validation: ",
-    )
-    dataloader_it = iter(r2r_dataloader)
-
-    # We rely on env showing the entire batch before repeating anything
-    looped = False
-
-    for num_steps in pbar:
-        # reset env
-        batch_dict = next(dataloader_it)
-
-        ml_loss, traj = rollout(
-            args=args, r2r_dataloader=r2r_dataloader, batch_dict=batch_dict, feedback=feedback,
-            train_ml=None, train_rl=False, nav_agent=nav_agent, vln_model=vln_model,
-            entropy_metric=entropy_metric, is_val=True
-        )
-
-        for s_traj in traj:
-            if s_traj['instr_id'] in results:
-                looped = True
-            else:
-                ml_loss = 0
-                results[s_traj['instr_id']] = s_traj
-
-        if looped:
-            break
-
-    # [MULTI-GPU] gather all prediction results from ALL GPU
-    preds = get_results(results)
-    all_preds = all_gather(preds)
-    all_preds = merge_dist_results(all_preds)
-
-    loss_str = "\n[Eval] {} epoch {}\n".format(args.val_split, epoch)
-    if args.rank == 0:
-        multi_prefixs = set([pdata['instr_id'].split('_')[0] for pdata in all_preds])
-        useful_score_summary = None
-        for prefix in multi_prefixs:
-            one_preds = []
-            for pdata in all_preds:
-                if pdata['instr_id'].split('_')[0] == prefix:
-                    one_preds.append(pdata)
-
-            if prefix == 'eqa':
-                score_summary = r2r_dataloader.dataset.eval_eqa_metrics(
-                    one_preds, logger=logger
-                )
-            else:
-                score_summary, _ = r2r_dataloader.dataset.eval_metrics(
-                    one_preds, logger=logger, data_type=prefix
-                )
-
-            if prefix == 'r2r':
-                useful_score_summary = score_summary
-            loss_str += "\n [Eval] dataset=[{}] \n".format(prefix)
-            for metric, val in score_summary.items():
-                if metric == 'sr':
-                    loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
-                else:
-                    loss_str += ', %s: %.2f' % (metric, val)
-
-        logger.info(loss_str)
-        if useful_score_summary is not None:
-            score_summary = useful_score_summary
-
-        if 'sr' in score_summary.keys():
-            # select model by Success Rate
-            if score_summary['sr'] >= best_val[args.val_split]['sr']:
-                best_val[args.val_split]['spl'] = score_summary['spl']
-                best_val[args.val_split]['sr'] = score_summary['sr']
-                best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
-
-                save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
-                if not only_inference:
-                    vln_model.save(epoch, str(save_ckpt_file),
-                                   vln_bert_optimizer=vln_optimizer[0],
-                                   critic_optimizer=vln_optimizer[1]
-                                   )
-        else:
-            save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
-            if not only_inference:
-                vln_model.save(epoch, str(save_ckpt_file),
-                               vln_bert_optimizer=vln_optimizer[0],
-                               critic_optimizer=vln_optimizer[1]
-                               )
-
-
-
-
