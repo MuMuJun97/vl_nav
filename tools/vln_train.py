@@ -590,6 +590,7 @@ def get_results(pred_results, detailed_output=False):
     return pred_output
 
 
+@torch.no_grad()
 def vln_val_one_epoch(
         args,
         vln_model: BertVLNModel,
@@ -654,28 +655,81 @@ def vln_val_one_epoch(
     all_preds = merge_dist_results(all_preds)
 
     loss_str = "\n[Eval] {} epoch {}".format(args.val_split, epoch)
+
     if args.rank == 0:
-        score_summary, _ = r2r_dataloader.dataset.eval_metrics(all_preds, logger)
-        loss_str += ", %s ||| " % args.val_split
-        for metric, val in score_summary.items():
-            if metric == 'sr':
-                loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
+        only_inference = False
+        multi_prefixs = set([pdata['instr_id'].split('_')[0] for pdata in all_preds])
+        useful_score_summary = None
+        for prefix in multi_prefixs:
+            one_preds = []
+            for pdata in all_preds:
+                if pdata['instr_id'].split('_')[0] == prefix:
+                    one_preds.append(pdata)
+
+            if prefix == 'eqa':
+                score_summary = r2r_dataloader.dataset.eval_eqa_metrics(
+                    one_preds, logger=logger
+                )
             else:
-                loss_str += ', %s: %.2f' % (metric, val)
+                score_summary, _ = r2r_dataloader.dataset.eval_metrics(
+                    one_preds, logger=logger, data_type=prefix
+                )
+
+            if prefix == 'r2r':
+                useful_score_summary = score_summary
+            loss_str += "\n [Eval] dataset=[{}] \n".format(prefix)
+            for metric, val in score_summary.items():
+                if metric == 'sr':
+                    loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
+                else:
+                    loss_str += ', %s: %.2f' % (metric, val)
 
         logger.info(loss_str)
+        if useful_score_summary is not None:
+            score_summary = useful_score_summary
 
-        # select model by Success Rate
-        if score_summary['sr'] >= best_val[args.val_split]['sr']:
-            best_val[args.val_split]['spl'] = score_summary['spl']
-            best_val[args.val_split]['sr'] = score_summary['sr']
-            best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
+        if 'sr' in score_summary.keys():
+            # select model by Success Rate
+            if score_summary['sr'] >= best_val[args.val_split]['sr']:
+                # best_val[args.val_split]['spl'] = score_summary['spl']
+                best_val[args.val_split]['sr'] = score_summary['sr']
+                best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
 
+                save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+                if not only_inference:
+                    vln_model.save(epoch, str(save_ckpt_file),
+                                   vln_bert_optimizer=vln_optimizer[0],
+                                   critic_optimizer=vln_optimizer[1]
+                                   )
+        else:
             save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
-            vln_model.save(epoch, str(save_ckpt_file),
-                           vln_bert_optimizer=vln_optimizer[0],
-                           critic_optimizer=vln_optimizer[1]
-                           )
+            if not only_inference:
+                vln_model.save(epoch, str(save_ckpt_file),
+                               vln_bert_optimizer=vln_optimizer[0],
+                               critic_optimizer=vln_optimizer[1]
+                               )
+
+        # score_summary, _ = r2r_dataloader.dataset.eval_metrics(all_preds, logger)
+        # loss_str += ", %s ||| " % args.val_split
+        # for metric, val in score_summary.items():
+        #     if metric == 'sr':
+        #         loss_str += '\n[Eval] ||| %s: %.2f' % (metric, val)
+        #     else:
+        #         loss_str += ', %s: %.2f' % (metric, val)
+        #
+        # logger.info(loss_str)
+        #
+        # # select model by Success Rate
+        # if score_summary['sr'] >= best_val[args.val_split]['sr']:
+        #     best_val[args.val_split]['spl'] = score_summary['spl']
+        #     best_val[args.val_split]['sr'] = score_summary['sr']
+        #     best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
+        #
+        #     save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+        #     vln_model.save(epoch, str(save_ckpt_file),
+        #                    vln_bert_optimizer=vln_optimizer[0],
+        #                    critic_optimizer=vln_optimizer[1]
+        #                    )
 
 
 

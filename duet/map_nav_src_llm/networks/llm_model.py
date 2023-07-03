@@ -145,9 +145,16 @@ class LangModel(nn.Module):
             self.lang_model = llama_model_in_debug_model(self.tokenizer_path)
             self.lang_model = self.lang_model.to(self.model_type)
         else:
-            self.lang_model = AutoModelForCausalLM.from_pretrained(
-                self.tokenizer_path, local_files_only=local_files_only
-            ).to(self.model_type)  # bfloat16, float16, float32
+            if self.tokenizer_path == "facebook/opt-iml-1.3b":
+                from transformers import OPTForCausalLM, AutoConfig
+                opt_config = AutoConfig.from_pretrained(self.tokenizer_path)
+                self.lang_model = OPTForCausalLM(opt_config).to(self.model_type)
+                model_size = sum(t.numel() for t in self.lang_model.parameters())
+                print(f"OPT-IML size: {model_size / 1000 ** 2:.1f}M parameters")
+            else:
+                self.lang_model = AutoModelForCausalLM.from_pretrained(
+                    self.tokenizer_path, local_files_only=local_files_only
+                ).to(self.model_type)  # bfloat16, float16, float32
 
         # llama-7b dim=4096, bloom dim=1024,
         self.hidden_size = self.lang_model.config.hidden_size

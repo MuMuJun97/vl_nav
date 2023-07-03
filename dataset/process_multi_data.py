@@ -120,7 +120,7 @@ def load_soon_data(anno_file):
             new_item['instruction'] = instr['full']
             # new_item['path_id'] = '{}_{}'.format(i, k)
             new_item['raw_idx'] = None
-            new_item['instr_encoding'] = None
+            new_item['instr_encoding'] = new_item['instr_encodings'][k]['full'][:100]
             new_item['heading'] = 0.0
             new_item['data_type'] = 'soon'
             del new_item['instructions']

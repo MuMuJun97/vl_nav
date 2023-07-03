@@ -1065,22 +1065,20 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             train_ml = batch['train_ml']
             nav_probs = []
             nav_loss = []
+
+            out_logits = self.out_head(hidden_states).squeeze()
+
             for t, item in batch['history'].items():
                 t_cand_masks = item[t]['cand_masks']
-                t_fuse_embeds = item[t]['fuse_embeds']
                 t_nav_targets = item[t]['nav_targets']
-                t_fuse_logits = torch.zeros((t_fuse_embeds.shape[0], t_fuse_embeds.shape[1])).to(
-                    t_fuse_embeds.device).to(self.model_type)
+
                 end_idx = start_idx + t_cand_masks.shape[-1]
-                t_hidden_states = hidden_states[:, start_idx:end_idx]
+                t_fuse_logits = out_logits[:, start_idx:end_idx]
                 start_idx = end_idx
                 t_gmap_visited_masks = item[t]['gmap_visited_masks']
-                t_hidden_states = t_hidden_states[t_cand_masks]
-                t_fuse_logits[t_cand_masks] = self.out_head(t_hidden_states).squeeze()
+
                 t_fuse_logits.masked_fill_(t_cand_masks.logical_not(), -float('inf'))
                 t_fuse_logits.masked_fill_(t_gmap_visited_masks, -float('inf'))
-
-                # t_nav_probs = torch.softmax(t_fuse_logits, 1)
 
                 nav_probs.append(t_fuse_logits.detach().data)
 

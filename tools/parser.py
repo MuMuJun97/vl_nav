@@ -19,6 +19,8 @@ def read_args():
     output_dir = Path(__file__).parent.parent.parent.resolve() / "vl_nav_output"
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--datasets', type=str, nargs='+')
+
     ############ VLN-Tasks [VLN-DUET] #############
     parser.add_argument('--feat_dropout', type=float, default=0.4) # image feature dropout
     parser.add_argument('--fusion', type=str, default='dynamic')  # ['local', 'global', 'dynamic']
@@ -166,4 +168,13 @@ def read_args():
     args.run_name = Path(args.output_dir) / args.run_name
     args.run_name.mkdir(parents=True,exist_ok=True)
     args.run_name = str(args.run_name)
+
+    if args.datasets is None:
+        args.datasets = ['EQA', 'R2R', 'SOON', 'REVERIE', 'CVDN']
+    else:
+        for dataset_name in args.datasets:
+            if dataset_name not in ['EQA', 'R2R', 'SOON', 'REVERIE', 'CVDN']:
+                print("ERROR NAME: {}".format(dataset_name))
+                raise NotImplementedError
+
     return args

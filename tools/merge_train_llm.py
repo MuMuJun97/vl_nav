@@ -586,7 +586,7 @@ def rollout(
     envs = batch_dict['env']
 
     if 'cvdn' in data_type or 'soon' in data_type:
-        max_action_len = 20
+        max_action_len = args.max_action_len
     else:
         max_action_len = args.max_action_len  # 15
 
@@ -942,7 +942,7 @@ def vln_val_one_epoch(
         if 'sr' in score_summary.keys():
             # select model by Success Rate
             if score_summary['sr'] >= best_val[args.val_split]['sr']:
-                best_val[args.val_split]['spl'] = score_summary['spl']
+                # best_val[args.val_split]['spl'] = score_summary['spl'] # bugs
                 best_val[args.val_split]['sr'] = score_summary['sr']
                 best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
 
