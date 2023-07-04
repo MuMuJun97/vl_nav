@@ -122,25 +122,27 @@ def main(opts):
                 )
             del tmp
         elif opts.init_pretrained == 'lxmert':
-            tmp = torch.load(
-                '../datasets/pretrained/LXMERT/model_LXRT.pth', 
-                map_location=lambda storage, loc: storage
-            )
-            for param_name, param in tmp.items():
-                param_name = param_name.replace('module.', '')
-                if 'bert.encoder.layer' in param_name:
-                    param_name = param_name.replace('bert.encoder.layer', 'bert.lang_encoder.layer')
-                    checkpoint[param_name] = param
-                elif 'bert.encoder.x_layers' in param_name:
-                    param_name1 = param_name.replace('bert.encoder.x_layers', 'bert.local_encoder.encoder.x_layers')
-                    param_name2 = param_name.replace('bert.encoder.x_layers', 'bert.global_encoder.encoder.x_layers')
-                    checkpoint[param_name1] = checkpoint[param_name2] = param
-                elif 'cls.predictions' in param_name:
-                    param_name = param_name.replace('cls.predictions', 'mlm_head.predictions')
-                    checkpoint[param_name] = param
-                else:
-                    checkpoint[param_name] = param
-            del tmp
+            # Not provide pretrained model
+            pass
+            # tmp = torch.load(
+            #     '../datasets/pretrained/LXMERT/model_LXRT.pth',
+            #     map_location=lambda storage, loc: storage
+            # )
+            # for param_name, param in tmp.items():
+            #     param_name = param_name.replace('module.', '')
+            #     if 'bert.encoder.layer' in param_name:
+            #         param_name = param_name.replace('bert.encoder.layer', 'bert.lang_encoder.layer')
+            #         checkpoint[param_name] = param
+            #     elif 'bert.encoder.x_layers' in param_name:
+            #         param_name1 = param_name.replace('bert.encoder.x_layers', 'bert.local_encoder.encoder.x_layers')
+            #         param_name2 = param_name.replace('bert.encoder.x_layers', 'bert.global_encoder.encoder.x_layers')
+            #         checkpoint[param_name1] = checkpoint[param_name2] = param
+            #     elif 'cls.predictions' in param_name:
+            #         param_name = param_name.replace('cls.predictions', 'mlm_head.predictions')
+            #         checkpoint[param_name] = param
+            #     else:
+            #         checkpoint[param_name] = param
+            # del tmp
     
     model_class = GlocalTextPathCMTPreTraining
     

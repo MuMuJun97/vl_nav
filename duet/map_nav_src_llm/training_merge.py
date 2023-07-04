@@ -166,6 +166,20 @@ def main():
         vln_model = BertVLNModel(
             args, logger=logger
         )
+
+        # experiments
+        if args.tokenizer_path == 'facebook/opt-iml-1.3b':
+            param_sums = sum(p.numel() for p in vln_model.vln_bert.vln_bert.parameters() if p.requires_grad)
+            print("OPT model initialized with {:.2f} M trainable parameters".format(param_sums/1000**2))
+            # freeze opt weights
+            # vln_model.vln_bert.vln_bert.lang_model.requires_grad_(False)
+            # vln_model.vln_bert.vln_bert.lang_model.\
+            #     lang_model.model.decoder.embed_tokens.requires_grad_(True)
+            # vln_model.vln_bert.vln_bert.lang_model.\
+            #     mapper.requires_grad_(True)
+            param_sums = sum(p.numel() for p in vln_model.vln_bert.vln_bert.parameters() if p.requires_grad)
+            print("after unfreeze: OPT model initialized with {:.2f} M trainable parameters".format(param_sums/1000**2))
+
         language_model = None
         tokenizer = None
 

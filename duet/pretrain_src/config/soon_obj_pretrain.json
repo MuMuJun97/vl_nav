@@ -32,13 +32,13 @@
     "train_datasets": {
         "SOON": {
             "name": "SOON",
-            "train_traj_files": ["../datasets/SOON/annotations/pretrain_obj/train_enc.jsonl"],
-            "val_seen_traj_files": ["../datasets/SOON/annotations/pretrain_obj/val_unseen_instrs_enc.jsonl"],
-            "val_unseen_traj_files": ["../datasets/SOON/annotations/pretrain_obj/val_unseen_house_enc.jsonl"],
-            "connectivity_dir": "../datasets/R2R/connectivity",
-            "img_ft_file": "../datasets/R2R/features/pth_vit_base_patch16_224_imagenet.hdf5",
-            "obj_ft_file": "../datasets/SOON/features/filtered_butd_bboxes.hdf5",
-            "scanvp_cands_file": "../datasets/R2R/annotations/scanvp_candview_relangles.json",
+            "train_traj_files": ["../../build/duet/SOON/annotations/pretrain_obj/train_enc.jsonl"],
+            "val_seen_traj_files": ["../../build/duet/SOON/annotations/pretrain_obj/val_unseen_instrs_enc.jsonl"],
+            "val_unseen_traj_files": ["../../build/duet/SOON/annotations/pretrain_obj/val_unseen_house_enc.jsonl"],
+            "connectivity_dir": "../../data/connectivity",
+            "img_ft_file": "../../build/duet/R2R/features/pth_vit_base_patch16_224_imagenet.hdf5",
+            "obj_ft_file": "../../build/duet/SOON/features/filtered_butd_bboxes.hdf5",
+            "scanvp_cands_file": "../../build/duet/R2R/annotations/scanvp_candview_relangles.json",
             "tasks": [
                 "mlm",
                 "mrc",

@@ -146,11 +146,16 @@ class LangModel(nn.Module):
             self.lang_model = self.lang_model.to(self.model_type)
         else:
             if self.tokenizer_path == "facebook/opt-iml-1.3b":
-                from transformers import OPTForCausalLM, AutoConfig
-                opt_config = AutoConfig.from_pretrained(self.tokenizer_path)
-                self.lang_model = OPTForCausalLM(opt_config).to(self.model_type)
-                model_size = sum(t.numel() for t in self.lang_model.parameters())
-                print(f"OPT-IML size: {model_size / 1000 ** 2:.1f}M parameters")
+                self.lang_model = AutoModelForCausalLM.from_pretrained(
+                    self.tokenizer_path, local_files_only=local_files_only
+                ).to(self.model_type)  # bfloat16, float16, float32
+
+                ### [+] re-init opt-iml weights
+                # from transformers import OPTForCausalLM, AutoConfig
+                # opt_config = AutoConfig.from_pretrained(self.tokenizer_path)
+                # self.lang_model = OPTForCausalLM(opt_config).to(self.model_type)
+                # model_size = sum(t.numel() for t in self.lang_model.parameters())
+                # print(f"OPT-IML size: {model_size / 1000 ** 2:.1f}M parameters")
             else:
                 self.lang_model = AutoModelForCausalLM.from_pretrained(
                     self.tokenizer_path, local_files_only=local_files_only
