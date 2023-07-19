@@ -247,8 +247,7 @@ class ImageEmbeddings(nn.Module):
         self.loc_linear = nn.Linear(config.angle_feat_size + 3, config.hidden_size)
         self.loc_layer_norm = BertLayerNorm(config.hidden_size, eps=1e-12)
 
-        # if config.obj_feat_size > 0 and config.obj_feat_size != config.image_feat_size:
-        if config.obj_feat_size > 0:
+        if config.obj_feat_size > 0 and config.obj_feat_size != config.image_feat_size:
             self.obj_linear = nn.Linear(config.obj_feat_size, config.hidden_size)
             self.obj_layer_norm = BertLayerNorm(config.hidden_size, eps=1e-12)
         else:
@@ -659,9 +658,6 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
 
         self.fuse_encoder = FuseEncoder(config.hidden_size)
 
-        if self.config.obj_feat_size > 0:
-            self.og_head = ClsPrediction(config.hidden_size)
-
         self.out_head = ClsPrediction(self.lang_model.hidden_size).to(self.lang_model.model_type)
 
         self.instruction = None
@@ -884,17 +880,9 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             fuse_logits.masked_fill_(cand_masks.logical_not(), -float('inf'))
             fuse_logits.masked_fill_(gmap_visited_masks, -float('inf'))
 
-            # object grounding logits
-            if vp_obj_masks is not None:
-                obj_logits = self.og_head(vp_embeds).squeeze(2)
-                obj_logits.masked_fill_(vp_obj_masks.logical_not(), -float('inf'))
-            else:
-                obj_logits = None
-
             return {
                 'fuse_embeds': fuse_embeds.detach(),
                 'fuse_logits': fuse_logits,
-                'obj_logits': obj_logits,
             }
 
 

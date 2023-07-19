@@ -18,7 +18,7 @@ from pathlib import Path
 import torch.utils.data as torch_data
 from torch.utils.data import DistributedSampler as _DistributedSampler
 from dataset.process_multi_data import (
-    load_r2r_data, load_soon_data,
+    load_r2r_data, load_soon_data, load_ade_soon_data,
     load_fr2r_data, load_reverie_data,
     generate_data_indexs,
     generate_graphs, load_nav_graphs,
@@ -263,19 +263,16 @@ class SrcDataset(torch_data.Dataset):
         self.training = training
         self.seed = args.seed
         self.feat_db = feat_db
+        self.obj_db = obj_feat_db
 
-        # object grounding ||| REVERIE
-        if obj_feat_db is not None:
-            assert isinstance(obj_feat_db, tuple)
-            self.obj_db = obj_feat_db[0]
-            self.obj2vps = obj_feat_db[1]  # {scan_objid: vp_list} (objects can be viewed at the viewpoints)
-            self.soon_obj_db = obj_feat_db[2]
+        if self.training:
+            self.multi_endpoints = args.multi_endpoints
+            self.multi_startpoints = args.multi_startpoints
+            self.max_objects = args.max_objects
         else:
-            self.obj_db = None
-            self.obj2vps = None
-            self.soon_obj_db = None
-        self.multi_endpoints = False  # only for REVERIE dataset
-        self.max_objects = 20
+            self.multi_endpoints = False
+            self.multi_startpoints = False
+            self.max_objects = None
 
         _root_dir = Path(args.source_dir)
 
@@ -339,7 +336,7 @@ class SrcDataset(torch_data.Dataset):
                 msg += '\n- Dataset: load {} R2R samples'.format(len(self.data['r2r']))
             elif source == 'SOON':
                 _anno_file = _root_dir / config.SOON.DIR / config.SOON.SPLIT[self.split]
-                self.data['soon'] = load_soon_data(anno_file=_anno_file)
+                self.data['soon'] = load_ade_soon_data(anno_file=_anno_file)
 
                 # gt trajectories
                 self.gt_trajs.update(
@@ -351,10 +348,6 @@ class SrcDataset(torch_data.Dataset):
             elif source == 'REVERIE':
                 _anno_file = _root_dir / config.REVERIE.DIR / config.REVERIE.SPLIT[self.split]
                 self.data['reverie'] = load_reverie_data(anno_file=_anno_file)
-
-                for item in self.data['reverie']:
-                    if 'objId' in item and item['objId'] is not None:
-                        item['end_vps'] = self.obj2vps['%s_%s' % (item['scan'], item['objId'])]
 
                 # gt trajectories
                 self.gt_trajs.update(
@@ -583,16 +576,7 @@ class SrcDataset(torch_data.Dataset):
             base_view_id = state.viewIndex
 
             if data_type == 'eqa':
-                feature = self.eqa_features.get_eqa_feature(
-                    split='train' if self.split == 'train' else 'val',
-                    idx=item['episode_id']
-                )
-                # Full features
-                candidate = self.make_eqa_candidate(feature, state.scanId, state.location.viewpointId, state.viewIndex, is_eqa=True)
-                extra_feature = np.zeros((36-feature.shape[0],feature.shape[1]),dtype=feature.dtype)
-                feature = np.concatenate([feature, extra_feature], 0)
-                # [visual_feature, angle_feature] for views
-                feature = np.concatenate((feature, np.zeros_like(self.angle_feature[12][:feature.shape[0],:])), -1)
+                raise NotImplementedError
             else:
                 if feature is None:
                     feature = self.feat_db.get_image_feature(state.scanId, state.location.viewpointId)
@@ -603,92 +587,53 @@ class SrcDataset(torch_data.Dataset):
                 # [visual_feature, angle_feature] for views
                 feature = np.concatenate((feature, self.angle_feature[base_view_id]), -1)
 
-            # if data_type == 'reverie' and self.obj_db is not None:
-            #     # objects
-            #     obj_img_fts, obj_ang_fts, obj_box_fts, obj_ids = self.obj_db.get_object_feature(
-            #         state.scanId, state.location.viewpointId,
-            #         state.heading, state.elevation, self.angle_feat_size,
-            #         max_objects=self.max_objects # 20
-            #     )
+                if self.obj_db is not None:
+                    # objects
+                    obj_img_fts, obj_ang_fts, obj_box_fts, obj_directions, obj_ids = \
+                        self.obj_db.get_object_feature(
+                            state.scanId, state.location.viewpointId,
+                            state.heading, state.elevation, self.angle_feat_size,
+                            max_objects=self.max_objects
+                        )
+                    gt_obj_id = None
+                    vp = state.location.viewpointId
+                    if vp in item.get('end_image_ids', []):
+                        pseudo_label = item['image_id_to_obj_label'][vp]
+                        if pseudo_label is not None:
+                            gt_obj_id = pseudo_label['obj_id']
 
-            # if (data_type == 'soon' or data_type == 'reverie') and self.soon_obj_db is not None:
-            #     # objects
-            if self.soon_obj_db is not None:
-                obj_img_fts, obj_ang_fts, obj_box_fts, obj_directions, obj_ids = self.soon_obj_db.get_object_feature(
-                    state.scanId, state.location.viewpointId,
-                    state.heading, state.elevation, self.angle_feat_size,
-                    max_objects=100
-                )
-            else:
-                obj_img_fts, obj_ang_fts, obj_box_fts, obj_directions, obj_ids = [None]*5
-
-            ob = {
-                'instr_id': item['instr_id'],
-                'scan': state.scanId,
-                'viewpoint': state.location.viewpointId,
-                'viewIndex': state.viewIndex,
-                'position': (state.location.x, state.location.y, state.location.z),
-                'heading': state.heading,
-                'elevation': state.elevation,
-                'feature': feature,
-                'candidate': candidate,
-                'navigableLocations': state.navigableLocations,
-                'instruction': item['instruction'],
-                'instr_encoding': item['instr_encoding'],
-                'gt_path': item['path'],
-                'path_id': item['path_id'],
-            }
-
-            # if data_type == 'reverie':
-            #     ob.update({
-            #         ### object grounding ###
-            #         'obj_img_fts': obj_img_fts, # [1, 2048]
-            #         'obj_ang_fts': obj_ang_fts, # [1,4]
-            #         'obj_box_fts': obj_box_fts, # [1,3]
-            #         'obj_ids': obj_ids, # [1,]
-            #         'gt_end_vps': item.get('end_vps', []), # [multi vps]
-            #         # 'gt_obj_id': item['objId'], #
-            #     })
-            #
-            #     ### RL reward. The negative distance between the state and the final state
-            #     ### There are multiple gt end viewpoints on REVERIE.
-            #     # if ob['instr_id'] in self.gt_trajs:
-            #     #     gt_objid = self.gt_trajs[ob['instr_id']][-1]
-            #     #     min_dist = np.inf
-            #     #     for vp in self.obj2vps['%s_%s' % (ob['scan'], str(gt_objid))]:
-            #     #         try:
-            #     #             min_dist = min(min_dist, self.shortest_distances[ob['scan']][ob['viewpoint']][vp])
-            #     #         except:
-            #     #             print(ob['scan'], ob['viewpoint'], vp)
-            #     #             exit(0)
-            #     #     ob['distance'] = min_dist
-            #     # else:
-            #     #     ob['distance'] = 0
-            #
-            # elif data_type == 'soon':
-            #     ob.update({
-            #         ### object grounding ###
-            #         'obj_img_fts': obj_img_fts, # [n, 2048]
-            #         'obj_ang_fts': obj_ang_fts, # [n,4]
-            #         'obj_box_fts': obj_box_fts, # [n,3]
-            #         'obj_ids': obj_ids, # [n,]
-            #         'gt_end_vps': item.get('end_image_ids', []), # get multi-end-viewpoints
-            #         # 'gt_obj_id': item['objId'], #
-            #     })
-            #
-            # else:
-            #     ob.update({
-            #         ### object grounding ###
-            #         'obj_img_fts': obj_img_fts,  # [1, 2048]
-            #         'obj_ang_fts': obj_ang_fts,  # [1,4]
-            #         'obj_box_fts': obj_box_fts,  # [1,3]
-            #         'obj_ids': obj_ids,  # [1,]
-            #     })
-
-            # if ob['instr_id'] in self.gt_trajs:
-            #     ob['distance'] = self.shortest_distances[ob['scan']][ob['viewpoint']][item['path'][-1]]
-            # else:
-            #     ob['distance'] = 0
+                ob = {
+                    'instr_id': item['instr_id'],
+                    'scan': state.scanId,
+                    'viewpoint': state.location.viewpointId,
+                    'viewIndex': state.viewIndex,
+                    'position': (state.location.x, state.location.y, state.location.z),
+                    'heading': state.heading,
+                    'elevation': state.elevation,
+                    'feature': feature,
+                    'candidate': candidate,
+                    'navigableLocations': state.navigableLocations,
+                    'instruction': item['instruction'],
+                    'instr_encoding': item['instr_encoding'],
+                    'gt_path': item['path'],
+                    'path_id': item['path_id'],
+                    ### SOON Object
+                    'obj_img_fts': obj_img_fts,
+                    'obj_ang_fts': obj_ang_fts,
+                    'obj_box_fts': obj_box_fts,
+                    'obj_directions': obj_directions,
+                    'obj_ids': obj_ids,
+                    'gt_end_vps': item.get('end_image_ids', []),
+                    'gt_obj_id': gt_obj_id,
+                }
+                if ob['path_id'] in self.gt_trajs:
+                    # A3C reward. There are multiple gt end viewpoints on SOON.
+                    min_dist = np.inf
+                    for vp in items[i]['end_image_ids']:
+                        min_dist = min(min_dist, self.shortest_distances[ob['scan']][ob['viewpoint']][vp])
+                    ob['distance'] = min_dist
+                else:
+                    ob['distance'] = 0
 
             obs.append(ob)
         return obs
@@ -700,35 +645,7 @@ class SrcDataset(torch_data.Dataset):
         instr_id = item['instr_id']
 
         if data_type == 'eqa':
-            item['instruction'] = item['question_text']
-            scanIds = [scan]
-            item['heading'] = 0.0
-            item['instr_encoding'] = None
-            item['path_id'] = None
-            item['path'] = self.shortest_paths[scan][
-                list(self.shortest_paths[scan].keys())[0]
-            ][list(self.shortest_paths[scan].keys())[0]]
-            viewpointIds = [item['path'][0]]
-            headings = [item['heading']]
-
-            env = EnvBatch(connectivity_dir=self.connectivity_dir, batch_size=1)
-            env.newEpisodes(scanIds, viewpointIds, headings)
-            observations = self.get_obs(items=[item], env=env, data_type=data_type)[0]
-            observations['answer'] = self.answer_vocab.word2idx(item['answer_text'])
-            data_dict = {
-                'sample_idx': index,
-                'instr_id': instr_id,
-                'observations': observations,
-                'env': env,
-                'item': item,
-                # 'instr': instr,
-                'data_type': data_type,
-                'scanIds': scanIds,
-                'viewpointIds': viewpointIds,
-                'headings': headings,
-                'answer': self.answer_vocab.word2idx(item['answer_text'])
-            }
-            return data_dict
+            raise NotImplementedError
 
         # check length of instruction
         max_len = 128
@@ -737,23 +654,21 @@ class SrcDataset(torch_data.Dataset):
             item['instruction'] = " ".join(item['instruction'].split()[:max_len])
 
         if data_type == 'reverie':
-            start_vp = item['path'][0]
-            end_vp = item['path'][-1]
-            # if self.multi_endpoints:
-            #     end_vp = item['end_vps'][np.random.randint(len(item['end_vps']))]
-            #     item = copy.deepcopy(self.alldata[index])
-            #     item['path'] = self.shortest_paths[item['scan']][start_vp][end_vp]
+            pass
 
         elif data_type == 'soon':
             if self.training:
                 item['heading'] = np.random.rand() * np.pi * 2
-                start_vp = item['path'][0]
-                end_vp = item['path'][-1]
-
-                # if self.multi_endpoints:
-                #     end_vp = item['end_image_ids'][np.random.randint(len(item['end_image_ids']))]
-                #     item = copy.deepcopy(self.alldata[index])
-                #     item['path'] = self.shortest_paths[item['scan']][start_vp][end_vp]
+                batch = [item]
+                start_vps = [x['path'][0] for x in batch]
+                end_vps = [x['path'][-1] for x in batch]
+                if self.multi_endpoints:
+                    for i, one_item in enumerate(batch):
+                        end_vp = one_item['end_image_ids'][np.random.randint(len(one_item['end_image_ids']))]
+                        end_vps[i] = end_vp
+                for i, one_item in enumerate(batch):
+                    one_item['path'] = self.shortest_paths[one_item['scan']][start_vps[i]][end_vps[i]]
+                item = batch[0]
             else:
                 item['heading'] = 1.52
             item['elevation'] = 0
@@ -775,7 +690,6 @@ class SrcDataset(torch_data.Dataset):
             'observations': observations,
             'env': env,
             'item': item,
-            # 'instr': instr,
             'data_type': data_type,
             'scanIds': scanIds,
             'viewpointIds': viewpointIds,
@@ -947,6 +861,47 @@ class SrcDataset(torch_data.Dataset):
 
         return scores
 
+    def eval_soon_item(self, traj, gt_item):
+        scores = {}
+        scan = gt_item['scan']
+
+        shortest_distances = self.shortest_distances[scan]
+
+        gt_path = gt_item['path']
+        gt_bboxes = gt_item['bboxes']
+        start_vp = gt_path[0]
+        goal_vp = gt_path[-1]
+
+        pred_path = traj
+        path = sum(pred_path, [])
+        assert gt_path[0] == path[0], 'Result trajectories should include the start position'
+
+        # follow the original evaluation
+        nearest_position = self.get_nearest(shortest_distances, goal_vp, path)
+
+        if path[-1] in gt_bboxes:
+            goal_vp = path[-1]  # update goal
+
+        scores['action_steps'] = len(pred_path) - 1
+        scores['trajectory_steps'] = len(path) - 1
+        scores['trajectory_lengths'] = np.sum([shortest_distances[a][b] for a, b in zip(path[:-1], path[1:])])
+
+        # navigation: success is navigation error < 3m
+        scores['nav_error'] = shortest_distances[path[-1]][goal_vp]
+        # nearest_position = self._get_nearest(shortest_distances, goal_vp, path)
+        scores['oracle_error'] = shortest_distances[nearest_position][goal_vp]
+        scores['success'] = scores['nav_error'] < 3.
+        scores['oracle_success'] = scores['oracle_error'] < 3.
+
+        scores['goal_progress'] = shortest_distances[start_vp][goal_vp] - \
+                                  shortest_distances[path[-1]][goal_vp]
+
+        gt_lengths = shortest_distances[gt_path[0]][goal_vp]
+
+        scores['spl'] = scores['success'] * gt_lengths / max(scores['trajectory_lengths'], gt_lengths, 0.01)
+
+        return scores
+
     def eval_metrics(self, preds, logger=None, data_type=None):
         ''' Evaluate each agent trajectory based on how close it got to the goal location
         the path contains [view_id, angle, vofv]'''
@@ -981,7 +936,7 @@ class SrcDataset(torch_data.Dataset):
                 traj_scores = self.eval_cvdn(gt_item['scan'], traj, gt_item)
             elif data_type == 'soon':
                 gt_item = self.gt_trajs[instr_id]
-                traj_scores = self.eval_dis_item(gt_item['scan'], traj, gt_path=gt_item['path'])
+                traj_scores = self.eval_soon_item(traj, gt_item)
             elif data_type == 'reverie':
                 scan, gt_traj, gt_objid = self.gt_trajs[instr_id]
                 traj_scores = self.eval_dis_item(scan, traj, gt_traj)

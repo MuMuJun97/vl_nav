@@ -127,14 +127,6 @@ class NavigationAgent(object):
         batch_view_lens, batch_obj_lens = [], []
         batch_cand_vpids, batch_objids = [], []
 
-        have_objects = ['obj_img_fts' in ob.keys() and ob['obj_img_fts'] is not None for ob in obs]
-        # if sum(have_objects) == len(obs):
-        #     use_obj = 'both'
-        # elif sum(have_objects) == 0:
-        #     use_obj = 'none'
-        # else:
-        #     use_obj = 'single'
-
         for i, ob in enumerate(obs):
             view_img_fts, view_ang_fts, nav_types, cand_vpids = [], [], [], []
             # cand views
@@ -157,56 +149,33 @@ class NavigationAgent(object):
             view_box_fts = np.array([[1, 1, 1]] * len(view_img_fts)).astype(np.float32)
             view_loc_fts = np.concatenate([view_ang_fts, view_box_fts], 1)
 
+            # object
+            obj_loc_fts = np.concatenate([ob['obj_ang_fts'], ob['obj_box_fts']], 1)
+            nav_types.extend([2] * len(obj_loc_fts))
+
             batch_view_img_fts.append(torch.from_numpy(view_img_fts))
-
-            batch_cand_vpids.append(cand_vpids)
-            if 'eqa' in ob['instr_id']:
-                batch_view_lens.append(5)
-            else:
-                batch_view_lens.append(len(view_img_fts))
-
-            if have_objects[i]:
-                # object
-                obj_loc_fts = np.concatenate([ob['obj_ang_fts'], ob['obj_box_fts']], 1)
-                nav_types.extend([2] * len(obj_loc_fts))
-                batch_obj_img_fts.append(torch.from_numpy(ob['obj_img_fts']))
-                batch_objids.append(ob['obj_ids'])
-                batch_obj_lens.append(len(ob['obj_img_fts']))
-                batch_loc_fts.append(torch.from_numpy(np.concatenate([view_loc_fts, obj_loc_fts], 0)))
-            else:
-                # pad-object
-                obj_loc_fts = np.zeros((0,7), dtype=view_img_fts.dtype)
-                nav_types.extend([2] * len(obj_loc_fts))
-                batch_obj_img_fts.append(torch.zeros((0, 2048), dtype=batch_view_img_fts[0].dtype))
-                batch_objids.append(np.array(['0'],dtype=object))
-                batch_obj_lens.append(0)
-                batch_loc_fts.append(torch.from_numpy(np.concatenate([view_loc_fts, obj_loc_fts], 0)))
-
+            batch_obj_img_fts.append(torch.from_numpy(ob['obj_img_fts']))
+            batch_loc_fts.append(torch.from_numpy(np.concatenate([view_loc_fts, obj_loc_fts], 0)))
             batch_nav_types.append(torch.LongTensor(nav_types))
+            batch_cand_vpids.append(cand_vpids)
+            batch_objids.append(ob['obj_ids'])
+            batch_view_lens.append(len(view_img_fts))
+            batch_obj_lens.append(len(ob['obj_img_fts']))
 
         # pad features to max_len
         batch_view_img_fts = pad_tensors(batch_view_img_fts).cuda()
+        batch_obj_img_fts = pad_tensors(batch_obj_img_fts).cuda()
         batch_loc_fts = pad_tensors(batch_loc_fts).cuda()
         batch_nav_types = pad_sequence(batch_nav_types, batch_first=True, padding_value=0).cuda()
         batch_view_lens = torch.LongTensor(batch_view_lens).cuda()
-
-        # object
-        batch_obj_img_fts = pad_tensors(batch_obj_img_fts).cuda()
         batch_obj_lens = torch.LongTensor(batch_obj_lens).cuda()
 
-        if not sum(have_objects):
-            return {
-                'view_img_fts': batch_view_img_fts, 'loc_fts': batch_loc_fts,
-                'nav_types': batch_nav_types, 'view_lens': batch_view_lens,
-                'cand_vpids': batch_cand_vpids,
-            }
-        else:
-            return {
-                'view_img_fts': batch_view_img_fts, 'obj_img_fts': batch_obj_img_fts,
-                'loc_fts': batch_loc_fts, 'nav_types': batch_nav_types,
-                'view_lens': batch_view_lens, 'obj_lens': batch_obj_lens,
-                'cand_vpids': batch_cand_vpids, 'obj_ids': batch_objids,
-            }
+        return {
+            'view_img_fts': batch_view_img_fts, 'obj_img_fts': batch_obj_img_fts,
+            'loc_fts': batch_loc_fts, 'nav_types': batch_nav_types,
+            'view_lens': batch_view_lens, 'obj_lens': batch_obj_lens,
+            'cand_vpids': batch_cand_vpids, 'obj_ids': batch_objids,
+        }
 
     def get_pos_fts(self, cnt_vp, cand_vps, cur_heading, cur_elevation, angle_feat_size=4):
         # dim=7 (sin(heading), cos(heading), sin(elevation), cos(elevation),
@@ -222,7 +191,7 @@ class NavigationAgent(object):
         rel_ang_fts = get_angle_fts(rel_angles[:, 0], rel_angles[:, 1], angle_feat_size)
         return rel_ang_fts
 
-    def nav_vp_variable(self, obs, gmaps, pano_embeds, cand_vpids, view_lens, nav_types):
+    def nav_vp_variable(self, obs, gmaps, pano_embeds, cand_vpids, view_lens, obj_lens, nav_types):
         batch_size = len(obs)
 
         # add [stop] token
@@ -243,21 +212,21 @@ class NavigationAgent(object):
             # add [stop] token at beginning
             vp_pos_fts = np.zeros((vp_img_embeds.size(1), 14), dtype=np.float32)
             vp_pos_fts[:, :7] = cur_start_pos_fts
-            vp_pos_fts[1:len(cur_cand_pos_fts) + 1, 7:] = cur_cand_pos_fts
+            vp_pos_fts[1:len(cur_cand_pos_fts)+1, 7:] = cur_cand_pos_fts
             batch_vp_pos_fts.append(torch.from_numpy(vp_pos_fts))
 
         batch_vp_pos_fts = pad_tensors(batch_vp_pos_fts).cuda()
 
         vp_nav_masks = torch.cat([torch.ones(batch_size, 1).bool().cuda(), nav_types == 1], 1)
-
-        vp_masks = gen_seq_masks(view_lens + 1, max_len=vp_img_embeds.shape[-2])
+        vp_obj_masks = torch.cat([torch.zeros(batch_size, 1).bool().cuda(), nav_types == 2], 1)
 
         return {
             'vp_img_embeds': vp_img_embeds,
             'vp_pos_fts': batch_vp_pos_fts,
-            'vp_masks': vp_masks,
+            'vp_masks': gen_seq_masks(view_lens+obj_lens+1),
             'vp_nav_masks': vp_nav_masks,
-            'vp_cand_vpids': [[None] + x for x in cand_vpids],
+            'vp_obj_masks': vp_obj_masks,
+            'vp_cand_vpids': [[None]+x for x in cand_vpids],
         }
 
     def nav_vp_variable_object(self, obs, start_pos, pano_embeds, cand_vpids, view_lens, obj_lens, nav_types):
@@ -309,34 +278,23 @@ class NavigationAgent(object):
         for i, gmap in enumerate(gmaps):
             visited_vpids, unvisited_vpids = [], []
             for k in gmap.node_positions.keys():
-                if self.args.act_visited_nodes: # False
-                    raise NotImplementedError
-                    # if k == obs[i]['viewpoint']:
-                    #     visited_vpids.append(k)
-                    # else:
-                    #     unvisited_vpids.append(k)
+                if gmap.graph.visited(k):
+                    visited_vpids.append(k)
                 else:
-                    if 'eqa' in obs[i]['instr_id']:  # For EQA
-                        unvisited_vpids.append(k)
-                    else:
-                        if gmap.graph.visited(k):
-                            visited_vpids.append(k)
-                        else:
-                            unvisited_vpids.append(k)
+                    unvisited_vpids.append(k)
             batch_no_vp_left.append(len(unvisited_vpids) == 0)
-            if self.args.enc_full_graph:  # True
+            if self.args.enc_full_graph:
                 gmap_vpids = [None] + visited_vpids + unvisited_vpids
                 gmap_visited_masks = [0] + [1] * len(visited_vpids) + [0] * len(unvisited_vpids)
             else:
-                raise NotImplementedError
-                # gmap_vpids = [None] + unvisited_vpids
-                # gmap_visited_masks = [0] * len(gmap_vpids)
+                gmap_vpids = [None] + unvisited_vpids
+                gmap_visited_masks = [0] * len(gmap_vpids)
 
             gmap_step_ids = [gmap.node_step_ids.get(vp, 0) for vp in gmap_vpids]
             gmap_img_embeds = [gmap.get_node_embed(vp) for vp in gmap_vpids[1:]]
             gmap_img_embeds = torch.stack(
                 [torch.zeros_like(gmap_img_embeds[0])] + gmap_img_embeds, 0
-            )  # cuda
+            )   # cuda
 
             gmap_pos_fts = gmap.get_pos_fts(
                 obs[i]['viewpoint'], gmap_vpids, obs[i]['heading'], obs[i]['elevation'],
@@ -344,7 +302,7 @@ class NavigationAgent(object):
 
             gmap_pair_dists = np.zeros((len(gmap_vpids), len(gmap_vpids)), dtype=np.float32)
             for i in range(1, len(gmap_vpids)):
-                for j in range(i + 1, len(gmap_vpids)):
+                for j in range(i+1, len(gmap_vpids)):
                     gmap_pair_dists[i, j] = gmap_pair_dists[j, i] = \
                         gmap.graph.distance(gmap_vpids[i], gmap_vpids[j])
 
@@ -429,25 +387,58 @@ class NavigationAgent(object):
                             print('scan %s: all vps are searched' % (scan))
         return torch.from_numpy(a).cuda()
 
-    # def make_equiv_action(self, a_t, gmaps, obs, traj=None, env=None):
-    # def make_equiv_action(self, a_t, obs, traj=None, env=None):
-    #     """
-    #     Interface between Panoramic view and Egocentric view
-    #     It will convert the action panoramic view action a_t to equivalent egocentric view actions for the simulator
-    #     """
-    #     for i, ob in enumerate(obs):
-    #         action = a_t[i]
-    #         if action is not None:            # None is the <stop> action
-    #             # traj[i]['path'].append(gmaps[i].graph.path(ob['viewpoint'], action))
-    #             traj[i]['path'].append([action])
-    #             if len(traj[i]['path'][-1]) == 1:
-    #                 prev_vp = traj[i]['path'][-2][-1]
-    #             else:
-    #                 prev_vp = traj[i]['path'][-1][-2]
-    #             viewidx = self.scanvp_cands['%s_%s'%(ob['scan'], prev_vp)][action]
-    #             heading = (viewidx % 12) * math.radians(30)
-    #             elevation = (viewidx // 12 - 1) * math.radians(30)
-    #             env[i].sims[0].newEpisode([ob['scan']], [action], [heading], [elevation])
+
+    def teacher_action(self, obs, vpids, ended, visited_masks=None):
+        """
+        Extract teacher actions into variable.
+        :param obs: The observation.
+        :param ended: Whether the action seq is ended
+        :return:
+        """
+        a = np.zeros(len(obs), dtype=np.int64)
+        for i, ob in enumerate(obs):
+            if ended[i]:                                            # Just ignore this index
+                a[i] = self.args.ignoreid
+            else:
+                if ob['viewpoint'] == ob['gt_path'][-1]:
+                    a[i] = 0    # Stop if arrived
+                else:
+                    scan = ob['scan']
+                    cur_vp = ob['viewpoint']
+                    min_idx, min_dist = self.args.ignoreid, float('inf')
+                    for j, vpid in enumerate(vpids[i]):
+                        if j > 0 and ((visited_masks is None) or (not visited_masks[i][j])):
+                            # dist = min([self.env.shortest_distances[scan][vpid][end_vp] for end_vp in ob['gt_end_vps']])
+                            dist = self.shortest_distances[scan][vpid][ob['gt_path'][-1]] \
+                                    + self.shortest_distances[scan][cur_vp][vpid]
+                            if dist < min_dist:
+                                min_dist = dist
+                                min_idx = j
+                    a[i] = min_idx
+                    if min_idx == self.args.ignoreid:
+                        print('scan %s: all vps are searched' % (scan))
+
+        return torch.from_numpy(a).cuda()
+
+
+    def teacher_object(self, obs, ended, view_lens):
+        targets = np.zeros(len(obs), dtype=np.int64)
+        for i, ob in enumerate(obs):
+            if ended[i]:
+                targets[i] = self.args.ignoreid
+            else:
+                i_vp = ob['viewpoint']
+                if i_vp not in ob['gt_end_vps']:
+                    targets[i] = self.args.ignoreid
+                else:
+                    i_objids = ob['obj_ids']
+                    targets[i] = self.args.ignoreid
+                    for j, obj_id in enumerate(i_objids):
+                        if str(obj_id) == str(ob['gt_obj_id']):
+                            targets[i] = j + view_lens[i] + 1
+                            break
+        return torch.from_numpy(targets).cuda()
+
 
     def make_equiv_action(self, a_t, gmaps, obs, traj=None, env=None):
         """
@@ -620,8 +611,7 @@ def rollout(
 
     # Init the logs
     entropys = []
-    ml_loss = 0.
-    cnt_loss = 0.
+    ml_loss, cnt_loss = 0., 0.
     flag = False
 
     for t in range(max_action_len):
@@ -668,7 +658,8 @@ def rollout(
             nav_inputs.update(
                 nav_agent.nav_vp_variable(
                     obs, gmaps, pano_embeds, pano_inputs['cand_vpids'],
-                    pano_inputs['view_lens'], pano_inputs['nav_types'],
+                    pano_inputs['view_lens'], pano_inputs['obj_lens'],
+                    pano_inputs['nav_types'],
                 )
             )
             nav_inputs.update({
@@ -685,6 +676,7 @@ def rollout(
             # dynamic fusion
             nav_logits = nav_outs['fuse_logits']
             nav_vpids = nav_inputs['gmap_vpids']
+            obj_logits = nav_outs['obj_logits']
 
             nav_probs = torch.softmax(nav_logits, 1)
 
@@ -692,27 +684,56 @@ def rollout(
             for i, gmap in enumerate(gmaps):
                 if not ended[i]:
                     i_vp = obs[i]['viewpoint']
-                    gmap.node_stop_scores[i_vp] = {
-                        'stop': nav_probs[i, 0].data.item(),
-                    }
+                    # update i_vp: stop and object grounding scores
+                    i_objids = obs[i]['obj_ids']
+                    i_obj_logits = obj_logits[i, pano_inputs['view_lens'][i] + 1:]
+                    if 'obj_directions' in obs[i]:
+                        gmap.node_stop_scores[i_vp] = {
+                            'stop': nav_probs[i, 0].data.item(),
+                            'og': i_objids[torch.argmax(i_obj_logits)] if len(i_objids) > 0 else None,
+                            'og_direction': obs[i]['obj_directions'][torch.argmax(i_obj_logits)] if len(
+                                i_objids) > 0 else None,
+                            'og_details': {'objids': i_objids, 'logits': i_obj_logits[:len(i_objids)]},
+                        }
+                    else:
+                        gmap.node_stop_scores[i_vp] = {
+                            'stop': nav_probs[i, 0].data.item(),
+                            'og': i_objids[torch.argmax(i_obj_logits)] if len(i_objids) > 0 else None,
+                            'og_direction': None,
+                            'og_details': {'objids': i_objids, 'logits': i_obj_logits[:len(i_objids)]},
+                        }
 
             # Imitation Learning
             if train_ml is not None or feedback == 'gt':
-                # Supervised training
+                # [1] Supervised training
                 imitation_learning = feedback == 'teacher'
-                nav_targets = nav_agent.teacher_action_r4r(
-                    obs, nav_vpids, ended,
-                    visited_masks=nav_inputs['gmap_visited_masks'],
-                    imitation_learning=imitation_learning, t=t, traj=traj
-                )
+                if 'r2r' in data_type:
+                    nav_targets = nav_agent.teacher_action_r4r(
+                        obs, nav_vpids, ended,
+                        visited_masks=nav_inputs['gmap_visited_masks'],
+                        imitation_learning=imitation_learning, t=t, traj=traj
+                    )
+                else:
+                    nav_targets = nav_agent.teacher_action(
+                        obs, nav_vpids, ended,
+                        visited_masks=nav_inputs['gmap_visited_masks'] if args.fusion != 'local' else None,
+                    )
+
                 if 'eqa' in data_type:
                     for idx in range(batch_size):
                         # if data_type[idx] == 'eqa' and nav_targets[idx] != nav_agent.args.ignoreid:
                         if data_type[idx] == 'eqa':
                             nav_targets[idx] = torch.tensor([obs[idx]['answer']], device=nav_targets.device)
+
                 ############# Single-Step Loss #############
                 cnt_loss += vln_model.criterion(nav_logits, nav_targets) * train_ml / batch_size
+
+                # [2] Object Grounding
+                obj_targets = nav_agent.teacher_object(obs, ended, pano_inputs['view_lens'])
+                cnt_loss += vln_model.criterion(obj_logits, obj_targets) * train_ml / batch_size
+
                 ml_loss += cnt_loss.detach()
+
                 ########### Single-Step Backward ###########
                 if not is_val:
                     cnt_loss.backward()
