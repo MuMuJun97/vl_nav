@@ -2,6 +2,7 @@ import json
 import random
 import pickle
 import time
+import copy
 import os
 import torch
 import gzip
@@ -15,6 +16,43 @@ import re
 import jsonlines
 SENTENCE_SPLIT_REGEX = re.compile(r"([^\w-]+)")
 debug = False
+
+
+def load_ade_soon_data(anno_file):
+    data = []
+    with jsonlines.open(str(anno_file), 'r') as f:
+        for item in f:
+            item['end_image_ids'] = [x['image_id'] for x in item['bboxes']]
+            item['image_id_to_obj_label'] = {x['image_id']: x.get('pseudo_label', None) for x in item['bboxes']}
+            new_bboxes = {}
+            for bbox in item['bboxes']:
+                new_bboxes[bbox['image_id']] = bbox
+            item['bboxes'] = new_bboxes
+            data.append(item)
+
+    new_data = []
+    sample_index = 0
+    for i, item in enumerate(data):
+        # Split multiple instructions into separate entries
+        for j, instr in enumerate(item['instructions']):
+            new_item = copy.deepcopy(item)
+            # soon: idx-path_idx-instr_idx
+            new_item['instr_id'] = "soon_{}_{}_{}".format(i, item['path_id'], j)
+            new_item['instruction'] = instr['full']
+            new_item['instr_encoding'] = item['instr_encodings'][j]['full'][:100]
+            del new_item['instructions']
+            del new_item['instr_encodings']
+
+            new_item['sample_idx'] = sample_index
+            new_item['raw_idx'] = None
+            new_item['heading'] = 0.0
+            new_item['data_type'] = 'soon'
+            new_data.append(new_item)
+            sample_index += 1
+    if debug:
+        return new_data[:20]
+    else:
+        return new_data
 
 
 def load_r2r_data(anno_file, max_instr_len=200):

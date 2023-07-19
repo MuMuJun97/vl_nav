@@ -8,11 +8,11 @@ Dataset:
   # Specify the dataset name to useR2R
   SOURCE: ['SOON']  # 'R2R', 'SOON', 'REVERIE', 'CVDN'
   SOON:
-    DIR: "data/SOON/annotations/duet" # train.json
+    DIR: "data/SOON/annotations/ade30k" # train.json
     SPLIT: {
-      "train": "train_enc_pseudo_obj_label.jsonl",
-      "val_seen": "val_unseen_instrs_enc_pseudo_obj_label.jsonl",
-      "val_unseen": "val_unseen_house_enc_pseudo_obj_label.jsonl",
+      "train": "train_enc_pseudo_obj_ade30k_label.jsonl",
+      "val_seen": "val_unseen_instrs_enc_pseudo_obj_ade30k_label.jsonl",
+      "val_unseen": "val_unseen_house_enc_pseudo_obj_ade30k_label.jsonl",
       "test": "None"
     }
 #    DIR: "data/SOON/annotations/iccv21_new_released" # train.json

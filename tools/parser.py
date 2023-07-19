@@ -20,6 +20,7 @@ def read_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--datasets', type=str, nargs='+')
+    parser.add_argument('--bert_ckpt_file', default=None, help='init vlnbert')  # from DUET
 
     ############ VLN-Tasks [VLN-DUET] #############
     parser.add_argument('--feat_dropout', type=float, default=0.4) # image feature dropout
