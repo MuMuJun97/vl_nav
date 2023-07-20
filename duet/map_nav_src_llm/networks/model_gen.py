@@ -127,9 +127,11 @@ class LangModel(nn.Module):
             self.tokenizer.padding_side = 'left'
             is_local_llama = True
         else:
-            self.tokenizer = AutoTokenizer.from_pretrained(
+            from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer
+            self.tokenizer = LlamaTokenizer.from_pretrained(
                 self.tokenizer_path, local_files_only=local_files_only
             )
+            self.tokenizer.padding_side = 'left'
             is_local_llama = False
 
         self.cand_token = ['<cand>']

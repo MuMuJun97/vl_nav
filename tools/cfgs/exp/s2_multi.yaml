@@ -1,12 +1,12 @@
 Dataset:
-  DATA_DIR: "/home/zlin/vln/turning/VLN-DUET"
-  IMG_DIR: "/media/zlin/2CD830B2D8307C60/Dataset/features/mp3d_raw_images"
+  DATA_DIR: "/mnt/petrelfs/zhaolin/vln/nav/features"
+  IMG_DIR: "/mnt/petrelfs/zhaolin/vln/nav/features/mp3d_raw_images"
 
   # navigableLocations
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['R2R','REVERIE']
+  SOURCE: ['R2R', 'REVERIE']
   SOON:
     DIR: "data/SOON/annotations/ade30k" # train.json
     SPLIT: {
