@@ -6,7 +6,7 @@ Dataset:
   MP3D_NAV: "data/mp3d/scan_viewpoint_nav_dict.pkl"
 
   # Specify the dataset name to useR2R
-  SOURCE: ['SOON', 'R2R', 'REVERIE', 'CVDN']
+  SOURCE: ['R2R']
   SOON:
     DIR: "data/SOON/annotations/ade30k" # train.json
     SPLIT: {

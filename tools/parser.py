@@ -22,6 +22,8 @@ def read_args():
     parser.add_argument('--datasets', type=str, nargs='+')
     parser.add_argument('--bert_ckpt_file', default=None, help='init vlnbert')  # from DUET
 
+    parser.add_argument('--fr2r_file', type=str, default="")
+
     ############ VLN-Tasks [VLN-DUET] #############
     parser.add_argument('--feat_dropout', type=float, default=0.4) # image feature dropout
     parser.add_argument('--fusion', type=str, default='dynamic')  # ['local', 'global', 'dynamic']

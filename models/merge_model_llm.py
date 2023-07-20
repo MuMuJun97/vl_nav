@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig
-from duet.map_nav_src_llm.networks.llm_model import VLNBert, Critic
+
 from models.transformer_model import (
     TransformerEncoderLayer, TransformerEncoder,
     pad_tensors_wgrad, gen_seq_masks, extend_neg_masks
@@ -381,9 +381,15 @@ class BertVLNModel(object):
     """
     @function: VLN-DUET Pipeline with LLMs
     """
-    def __init__(self, args, logger=None):
+    def __init__(self, args, logger=None, gen=False):
         super().__init__()
         self.args = args
+
+        if gen:
+            from duet.map_nav_src_llm.networks.model_gen import VLNBert, Critic
+        else:
+            from duet.map_nav_src_llm.networks.llm_model import VLNBert, Critic
+
         self.vln_bert = VLNBert(self.args, use_ddp=True)
         self.critic = Critic(self.args)
 
