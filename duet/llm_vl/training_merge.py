@@ -145,6 +145,33 @@ def main():
     if args.val:
         args.val_split = 'val_unseen' # validation on val_unseen split
 
+    ############### Param ############### 
+    args.seed = 0
+    args.dataset = 'soon'
+
+    args.enc_full_graph = True
+    args.graph_sprels = True
+    args.fusion = 'dynamic'
+
+    # args.image_feat_size = 768
+    args.angle_feat_size = 4
+    args.obj_feat_size = 768
+
+    args.multi_startpoints = False
+    args.multi_endpoints = True
+    args.max_objects = 70
+    args.max_action_len = 15
+
+    args.num_l_layers = 9
+    args.num_pano_layers = 2
+    args.num_x_layers = 4
+
+    args.ignoreid = -100
+    args.dropout = 0.5
+    args.expert_policy = 'spl'
+
+    ############### Param ###############
+
     logger, global_cfg = init_config(args)
     random_seed(seed=args.seed)
 
@@ -152,29 +179,6 @@ def main():
     if args.enable_language_model:
         raise NotImplementedError
     else:
-        args.seed = 0
-        args.dataset = 'soon'
-
-        args.enc_full_graph = True
-        args.graph_sprels = True
-        args.fusion = 'dynamic'
-
-        # args.image_feat_size = 768
-        args.angle_feat_size = 4
-        args.obj_feat_size = 768
-
-        args.multi_startpoints = False
-        args.multi_endpoints = True
-        args.max_objects = 70
-        args.max_action_len = 15
-
-        args.num_l_layers = 9
-        args.num_pano_layers = 2
-        args.num_x_layers = 4
-
-        args.ignoreid = -100
-        args.dropout = 0.5
-        args.expert_policy = 'spl'
 
         # we re-construct DUET Pipeline with LLMs
         vln_model = BertVLNModel(

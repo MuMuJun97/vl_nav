@@ -581,7 +581,7 @@ def rollout(
     else:
         max_action_len = args.max_action_len  # 15
 
-    args.max_action_len = 15
+    # args.max_action_len = 15
     nav_agent.update_scanvp_cands(obs)
     batch_size = len(obs)
 
