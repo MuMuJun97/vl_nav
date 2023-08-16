@@ -1,0 +1,242 @@
+srun: job 1663154 queued and waiting for resources
+srun: job 1663154 has been allocated resources
+srun: Job 1663154 scheduled successfully!
+Current QUOTA_TYPE is [reserved], which means the job has occupied quota in RESERVED_TOTAL under your partition.
+Current PHX_PRIORITY is normal
+
+WARNING:torch.distributed.run:
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+features file:  ../../build/duet/R2R/features/eva_clip_bridge.hdf5
+Init distributed 7 - 8
+features file:  ../../build/duet/R2R/features/eva_clip_bridge.hdf5
+Init distributed 6 - 8
+features file:  features file: ../../build/duet/R2R/features/eva_clip_bridge.hdf5 
+../../build/duet/R2R/features/eva_clip_bridge.hdf5
+Init distributed 0 - 8
+Init distributed 3 - 8
+features file:  ../../build/duet/R2R/features/eva_clip_bridge.hdf5features file: 
+ ../../build/duet/R2R/features/eva_clip_bridge.hdf5
+features file:  ../../build/duet/R2R/features/eva_clip_bridge.hdf5
+Init distributed 5 - 8
+Init distributed 4 - 8
+Init distributed 2 - 8
+features file:  ../../build/duet/R2R/features/eva_clip_bridge.hdf5
+Init distributed 1 - 8
+../../build/duet/R2R/annotations../../build/duet/R2R/annotations../../build/duet/R2R/annotations ../../build/duet/R2R/annotationsr2r  r2r   r2rr2r['train']  
+['train']['train']['train']
+
+
+../../build/duet/R2R/annotations r2r ['train']
+Loading navigation graphs for 61 scans
+Loading navigation graphs for 61 scans
+Loading navigation graphs for 61 scans
+Loading navigation graphs for 61 scans
+Loading navigation graphs for 61 scans
+../../build/duet/R2R/annotations r2r ['train']
+../../build/duet/R2R/annotations r2r ['train']
+../../build/duet/R2R/annotations r2r ['train']
+Loading navigation graphs for 61 scans
+Loading navigation graphs for 61 scans
+Loading navigation graphs for 61 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 14039 instructions, using splits: train
+../../build/duet/R2R/annotations r2r ['val_train_seen']
+Loading navigation graphs for 34 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+R2RNavBatch loaded with 24 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 18 instructions, using splits: val_train_seen
+../../build/duet/R2R/annotations r2r ['val_seen']
+Loading navigation graphs for 56 scans
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+Loading navigation graphs for 11 scans
+R2RNavBatch loaded with 132 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+Loading navigation graphs for 11 scans
+Loading navigation graphs for 11 scans
+Loading navigation graphs for 11 scans
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+Loading navigation graphs for 11 scans
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+Loading navigation graphs for 11 scans
+
+Initalizing the VLN-BERT model ...
+Loading navigation graphs for 11 scans
+R2RNavBatch loaded with 298 instructions, using splits: val_unseen
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+R2RNavBatch loaded with 127 instructions, using splits: val_seen
+../../build/duet/R2R/annotations r2r ['val_unseen']
+Loading navigation graphs for 11 scans
+
+Initalizing the VLN-BERT model ...
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+
+Initalizing the VLN-BERT model ...
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+
+Initalizing the VLN-BERT model ...
+
+Initalizing the VLN-BERT model ...
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+
+Initalizing the VLN-BERT model ...
+
+Initalizing the VLN-BERT model ...
+R2RNavBatch loaded with 293 instructions, using splits: val_unseen
+Namespace(act_visited_nodes=False, angle_feat_size=4, anno_dir='../../build/duet/R2R/annotations', aug=None, batch_size=2, bert_ckpt_file=None, cand_loss=False, ckpt_dir='../../../eva_4096_r2r_v3/ckpts', connectivity_dir='../../build/duet/R2R/connectivity', dataset='r2r', detailed_output=False, dropout=0.5, enc_full_graph=True, entropy_loss_weight=0.01, epsilon=0.1, eval_first=False, expert_policy='spl', expl_max_ratio=0.6, expl_sample=False, feat_dropout=0.4, features='evaclip_4096', feedback='sample', fix_lang_embedding=False, fix_local_branch=False, fix_pano_embedding=False, fusion='local', gamma=0.0, graph_sprels=True, hist_loss=True, ignoreid=-100, image_feat_size=4096, img_ft_file='../../build/duet/R2R/features/eva_clip_bridge.hdf5', iters=20000, local_rank=-1, log_dir='../../../eva_4096_r2r_v3/logs', log_every=1000, lr=5e-05, max_action_len=15, max_instr_len=200, ml_weight=0.2, no_backtrack=False, node_rank=0, normalize_loss='total', num_l_layers=9, num_pano_layers=2, num_x_layers=4, obj_feat_size=0, optim='adamW', output_dir='../../../eva_4096_r2r_v3', pred_dir='../../../eva_4096_r2r_v3/preds', resume_file=None, resume_optimizer=False, root_dir='../../build/duet', scan_data_dir='../../build/duet/Matterport3D/v1_unzip_scans', seed=0, submit=False, test=False, tokenizer='bert', train_alg='dagger', views=36, weight_decay=0.0, world_size=8)
+
+
+
+Initalizing the VLN-BERT model ...
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+You are using a model of type bert to instantiate a model of type . This is not supported for all configurations of models and can yield errors.
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:20<00:20, 20.99s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:21<00:21, 21.64s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:21<00:21, 21.85s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:22<00:22, 22.39s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:22<00:22, 22.05s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:22<00:22, 22.38s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:21<00:21, 21.79s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:24<00:24, 24.86s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:27<00:00, 12.62s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:27<00:00, 13.88s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:28<00:00, 13.09s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:28<00:00, 14.37s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 13.21s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 14.51s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 13.30s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 14.66s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 13.61s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 14.92s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 13.55s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 14.82s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 13.33s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:29<00:00, 14.60s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:33<00:00, 15.03s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:33<00:00, 16.51s/it]
+Traceback (most recent call last):
+  File "r2r/main_nav.py", line 289, in <module>
+    main()
+  File "r2r/main_nav.py", line 283, in main
+    train(args, train_env, val_envs, aug_env=aug_env, rank=rank)
+  File "r2r/main_nav.py", line 100, in train
+    listner = agent_class(args, train_env, rank=rank)
+  File "/mnt/petrelfs/zhaolin/vln/nav/vl_nav/duet/map_nav_src/r2r/agent_base.py", line 118, in __init__
+    self._build_model()
+  File "/mnt/petrelfs/zhaolin/vln/nav/vl_nav/duet/map_nav_src/r2r/agent.py", line 31, in _build_model
+    self.vln_bert = VLNBert(self.args).cuda()
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/nn/modules/module.py", line 680, in cuda
+    return self._apply(lambda t: t.cuda(device))
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/nn/modules/module.py", line 570, in _apply
+    module._apply(fn)
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/nn/modules/module.py", line 570, in _apply
+    module._apply(fn)
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/nn/modules/module.py", line 570, in _apply
+    module._apply(fn)
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/nn/modules/module.py", line 593, in _apply
+    param_applied = fn(param)
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/nn/modules/module.py", line 680, in <lambda>
+    return self._apply(lambda t: t.cuda(device))
+RuntimeError: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call,so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1.
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67643 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67644 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67649 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67650 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67651 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67652 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 67653 closing signal SIGTERM
+ERROR:torch.distributed.elastic.multiprocessing.api:failed (exitcode: 1) local_rank: 2 (pid: 67646) of binary: /mnt/petrelfs/zhaolin/anaconda3/envs/py38/bin/python
+Traceback (most recent call last):
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/bin/torchrun", line 8, in <module>
+    sys.exit(main())
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 345, in wrapper
+    return f(*args, **kwargs)
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/distributed/run.py", line 719, in main
+    run(args)
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/distributed/run.py", line 710, in run
+    elastic_launch(
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/distributed/launcher/api.py", line 131, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/mnt/petrelfs/zhaolin/anaconda3/envs/py38/lib/python3.8/site-packages/torch/distributed/launcher/api.py", line 259, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+r2r/main_nav.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2023-08-11_10:02:03
+  host      : SH-IDC1-10-140-24-55
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 67646)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+srun: error: SH-IDC1-10-140-24-55: task 0: Exited with exit code 1

@@ -125,4 +125,5 @@ def init_distributed_device(args):
         device = "cpu"
     args.device = device
     device = torch.device(device)
+    
     return device

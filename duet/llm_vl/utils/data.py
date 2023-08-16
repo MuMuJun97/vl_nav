@@ -42,6 +42,23 @@ class ImageFeaturesDB(object):
         return ft
 
 
+class EvaImageFeaturesDB(object):
+    def __init__(self, img_ft_file, image_feat_size):
+        self.image_feat_size = image_feat_size
+        self.img_ft_file = img_ft_file
+        self._feature_store = {}
+
+    def get_image_feature(self, scan, viewpoint):
+        key = '%s_%s' % (scan, viewpoint)
+        if key in self._feature_store:
+            ft = self._feature_store[key]
+        else:
+            with h5py.File(self.img_ft_file, 'r') as f:
+                ft = f[key][...][:, :self.image_feat_size].astype(np.float32)
+                self._feature_store[key] = ft
+        return ft
+
+
 class ObjectFeatureDB(object):
     def __init__(self, obj_ft_file, obj_feat_size):
         self.obj_feat_size = obj_feat_size

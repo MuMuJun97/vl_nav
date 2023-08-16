@@ -7,30 +7,27 @@ import torch.nn.functional as F
 
 from transformers import BertPreTrainedModel
 
-from .vlnbert_init import get_vlnbert_models, get_vlnbert_models_ddp
+from .vlnbert_init import get_vlnbert_models
 
 class VLNBert(nn.Module):
-    def __init__(self, args, use_ddp=False):
+    def __init__(self, args):
         super().__init__()
         print('\nInitalizing the VLN-BERT model ...')
         self.args = args
 
-        if use_ddp:
-            self.vln_bert = get_vlnbert_models_ddp(args, config=None)
-        else:
-            self.vln_bert = get_vlnbert_models(args, config=None)  # initialize the VLN-BERT
+        self.vln_bert = get_vlnbert_models(args, config=None)  # initialize the VLN-BERT
         self.drop_env = nn.Dropout(p=args.feat_dropout)
         
     def forward(self, mode, batch):
         batch = collections.defaultdict(lambda: None, batch)
         
         if mode == 'language':            
-            txt_embeds = self.vln_bert(mode, batch)
-            return txt_embeds
+            self.vln_bert(mode, batch)
+            return
 
-        elif mode == 'panorama': # batch['view_img_fts'] [B, 36, D=768] --> dropout
+        elif mode == 'panorama':
             batch['view_img_fts'] = self.drop_env(batch['view_img_fts'])
-            if 'obj_img_fts' in batch: # False
+            if 'obj_img_fts' in batch:
                 batch['obj_img_fts'] = self.drop_env(batch['obj_img_fts'])
             pano_embeds, pano_masks = self.vln_bert(mode, batch)
             return pano_embeds, pano_masks
@@ -39,6 +36,14 @@ class VLNBert(nn.Module):
             outs = self.vln_bert(mode, batch)
             return outs
 
+        elif mode == 'qa':
+            outs = self.vln_bert(mode, batch)
+            return outs
+
+        elif mode == 'sum':
+            outs = self.vln_bert(mode, batch)
+            return outs
+        
         else:
             raise NotImplementedError('wrong mode: %s'%mode)
 

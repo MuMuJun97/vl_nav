@@ -19,6 +19,10 @@ def read_args():
     output_dir = Path(__file__).parent.parent.parent.resolve() / "vl_nav_output"
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--use_eva_clip', type=bool, default=False, help="whether use eva_clip features")
+    parser.add_argument('--image_feat_size', type=int, default=768)
+    parser.add_argument('--img_ft_file', type=str, default="vitbase")
+
     parser.add_argument('--datasets', type=str, nargs='+')
     parser.add_argument('--bert_ckpt_file', default=None, help='init vlnbert')  # from DUET
 

@@ -30,12 +30,12 @@ class SoonObjectNavBatch(object):
         self.obj_db = obj_db
         self.data = instr_data
         self.scans = set([x['scan'] for x in self.data])
-        self.multi_endpoints = multi_endpoints  # True
-        self.multi_startpoints = multi_startpoints  # False
+        self.multi_endpoints = multi_endpoints
+        self.multi_startpoints = multi_startpoints
         self.connectivity_dir = connectivity_dir
         self.batch_size = batch_size
         self.angle_feat_size = angle_feat_size
-        self.max_objects = max_objects  # 100
+        self.max_objects = max_objects
         self.name = name
         self.is_train = is_train
 
@@ -283,18 +283,18 @@ class SoonObjectNavBatch(object):
                 'instr_encoding': item['instr_encoding'],
                 'gt_path' : item['path'],
                 'gt_end_vps': item.get('end_image_ids', []),
-                # 'gt_obj_id': gt_obj_id,
+                'gt_obj_id': gt_obj_id,
                 'path_id' : item['path_id']
             }
 
-            # if ob['path_id'] in self.gt_trajs:
-            #     # A3C reward. There are multiple gt end viewpoints on SOON.
-            #     min_dist = np.inf
-            #     for vp in self.batch[i]['end_image_ids']:
-            #         min_dist = min(min_dist, self.shortest_distances[ob['scan']][ob['viewpoint']][vp])
-            #     ob['distance'] = min_dist
-            # else:
-            #     ob['distance'] = 0
+            if ob['path_id'] in self.gt_trajs:
+                # A3C reward. There are multiple gt end viewpoints on SOON. 
+                min_dist = np.inf
+                for vp in self.batch[i]['end_image_ids']:
+                    min_dist = min(min_dist, self.shortest_distances[ob['scan']][ob['viewpoint']][vp])
+                ob['distance'] = min_dist
+            else:
+                ob['distance'] = 0
 
             obs.append(ob)
         return obs

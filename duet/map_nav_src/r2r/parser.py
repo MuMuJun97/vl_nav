@@ -52,6 +52,9 @@ def parse_args():
     parser.add_argument('--fix_pano_embedding', action='store_true', default=False)
     parser.add_argument('--fix_local_branch', action='store_true', default=False)
 
+    parser.add_argument('--cand_loss', action='store_true', default=False)
+    parser.add_argument('--hist_loss', action='store_true', default=False)
+
     parser.add_argument('--num_l_layers', type=int, default=9)
     parser.add_argument('--num_pano_layers', type=int, default=2)
     parser.add_argument('--num_x_layers', type=int, default=4)
@@ -109,11 +112,21 @@ def parse_args():
 def postprocess_args(args):
     ROOTDIR = args.root_dir
 
+    # # Setup input paths
+    # ft_file_map = {
+    #     'vitbase': 'pth_vit_base_patch16_224_imagenet.hdf5',
+    # }
+    # args.img_ft_file = os.path.join(ROOTDIR, 'R2R', 'features', ft_file_map[args.features])
+
     # Setup input paths
     ft_file_map = {
         'vitbase': 'pth_vit_base_patch16_224_imagenet.hdf5',
+        'evaclip': 'eva_clip_imgfeats.hdf5',
+        'evaclip_4096': 'eva_clip_bridge.hdf5'
     }
     args.img_ft_file = os.path.join(ROOTDIR, 'R2R', 'features', ft_file_map[args.features])
+
+    print("features file: ", args.img_ft_file)
 
     args.connectivity_dir = os.path.join(ROOTDIR, 'R2R', 'connectivity')
     args.scan_data_dir = os.path.join(ROOTDIR, 'Matterport3D', 'v1_unzip_scans')

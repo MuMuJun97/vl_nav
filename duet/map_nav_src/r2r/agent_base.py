@@ -6,6 +6,7 @@ import random
 import math
 import time
 from collections import defaultdict
+from torch.optim import Optimizer, lr_scheduler
 
 import torch
 import torch.nn as nn
@@ -23,6 +24,8 @@ class BaseAgent(object):
     def __init__(self, env):
         self.env = env
         self.results = {}
+        with open('/mnt/lustre/huangshijia.p/MM/new/fr2r_qa.json') as f:
+            self.jj = json.load(f)
 
     def get_results(self, detailed_output=False):
         output = []
@@ -39,7 +42,8 @@ class BaseAgent(object):
     @staticmethod
     def get_agent(name):
         return globals()[name+"Agent"]
-
+    
+    @torch.no_grad()
     def test(self, iters=None, **kwargs):
         self.env.reset_epoch(shuffle=(iters is not None))   # If iters is not none, shuffle the env batch
         self.losses = []
@@ -64,6 +68,7 @@ class BaseAgent(object):
                 if looped:
                     break
 
+    @torch.no_grad()
     def test_viz(self, iters=None, **kwargs):
         self.env.reset_epoch(shuffle=(iters is not None))   # If iters is not none, shuffle the env batch
         self.losses = []
@@ -136,6 +141,9 @@ class Seq2SeqAgent(BaseAgent):
         self.vln_bert_optimizer = optimizer(self.vln_bert.parameters(), lr=self.args.lr)
         self.critic_optimizer = optimizer(self.critic.parameters(), lr=self.args.lr)
         self.optimizers = (self.vln_bert_optimizer, self.critic_optimizer)
+        print(self.args.iters)
+        # self.scheduler = lr_scheduler.CosineAnnealingLR(self.vln_bert_optimizer, self.args.iters, eta_min=self.args.lr*0.1)
+
 
         # Evaluations
         self.criterion = nn.CrossEntropyLoss(ignore_index=self.args.ignoreid, reduction='sum')
@@ -163,10 +171,11 @@ class Seq2SeqAgent(BaseAgent):
 
     def train(self, n_iters, feedback='teacher', **kwargs):
         ''' Train for a given number of iterations '''
-        self.feedback = feedback # 'sample'
+        self.feedback = feedback
 
         self.vln_bert.train()
         self.critic.train()
+
 
         self.losses = []
         for iter in range(1, n_iters + 1):
@@ -181,12 +190,12 @@ class Seq2SeqAgent(BaseAgent):
                 self.rollout(
                     train_ml=1., train_rl=False, **kwargs
                 )
-            elif self.args.train_alg == 'dagger': # train_alg='dagger'
-                if self.args.ml_weight != 0: # default: 0.2
+            elif self.args.train_alg == 'dagger': 
+                if self.args.ml_weight != 0:
                     self.feedback = 'teacher'
                     self.rollout(
                         train_ml=self.args.ml_weight, train_rl=False, **kwargs
-                    ) # self.args.ml_weight=0.2
+                    )
                 self.feedback = 'expl_sample' if self.args.expl_sample else 'sample'
                 self.rollout(train_ml=1, train_rl=False, **kwargs)
             else:
@@ -198,14 +207,15 @@ class Seq2SeqAgent(BaseAgent):
                 self.feedback = 'sample'
                 self.rollout(train_ml=None, train_rl=True, **kwargs)
 
-            #print(self.rank, iter, self.loss)
-            self.loss.backward()
+            #print(self.rank, iter, self.adam)
+            # self.loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.vln_bert.parameters(), 40.)
 
             self.vln_bert_optimizer.step()
             self.critic_optimizer.step()
-
+            # self.scheduler.step()
+            
             if self.args.aug is None:
                 print_progress(iter, n_iters+1, prefix='Progress:', suffix='Complete', bar_length=50)
 

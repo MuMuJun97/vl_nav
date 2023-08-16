@@ -37,7 +37,7 @@ class EnvBatch(object):
         self.sims = []
         for i in range(batch_size):
             sim = MatterSim.Simulator()
-            if scan_data_dir: # None
+            if scan_data_dir:
                 sim.setDatasetPath(scan_data_dir)
             sim.setNavGraphPath(connectivity_dir)
             sim.setRenderingEnabled(False)
@@ -82,14 +82,18 @@ class R2RNavBatch(object):
 
     def __init__(
         self, view_db, instr_data, connectivity_dir, 
-        batch_size=64, angle_feat_size=4, seed=0, name=None, sel_data_idxs=None,
+        batch_size=64, angle_feat_size=4, seed=0, name=None, sel_data_idxs=None, rank=0, split_data=1,
     ):
         self.env = EnvBatch(connectivity_dir, feat_db=view_db, batch_size=batch_size)
         self.data = instr_data
+        if split_data > 1:
+            cc = len(self.data) // split_data
+            self.data = self.data[cc*rank:cc*(rank+1)]
+            print('split data: {} {}'.format(cc*rank,cc*(rank+1)))
         self.scans = set([x['scan'] for x in self.data])
         self.connectivity_dir = connectivity_dir
         self.batch_size = batch_size
-        self.angle_feat_size = angle_feat_size # 4
+        self.angle_feat_size = angle_feat_size
         self.name = name
 
         self.gt_trajs = self._get_gt_trajs(self.data) # for evaluation

@@ -33,14 +33,20 @@ def load_instr_datasets(anno_dir, dataset, splits, tokenizer, is_test=True):
 
 def construct_instrs(anno_dir, dataset, splits, tokenizer, max_instr_len=512, is_test=True):
     data = []
+    print(anno_dir, dataset, splits)
     for i, item in enumerate(load_instr_datasets(anno_dir, dataset, splits, tokenizer, is_test=is_test)):
         # Split multiple instructions into separate entries
         for j, instr in enumerate(item['instructions']):
             new_item = dict(item)
             new_item['instr_id'] = '%s_%d' % (item['path_id'], j)
             new_item['instruction'] = instr
-            new_item['instr_encoding'] = item['instr_encodings'][j][:max_instr_len]
             del new_item['instructions']
-            del new_item['instr_encodings']
+            if 'instr_encodings' in item:
+                new_item['instr_encoding'] = item['instr_encodings'][j][:max_instr_len]
+                del new_item['instr_encodings']
+            elif 'instr_enc' in item:
+                new_item['instr_encoding'] = item['instr_enc'][:max_instr_len]
+                del new_item['instr_enc']
+
             data.append(new_item)
     return data

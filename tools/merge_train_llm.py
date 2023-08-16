@@ -581,6 +581,7 @@ def rollout(
     else:
         max_action_len = args.max_action_len  # 15
 
+    args.max_action_len = 15
     nav_agent.update_scanvp_cands(obs)
     batch_size = len(obs)
 
@@ -960,26 +961,26 @@ def vln_val_one_epoch(
         if useful_score_summary is not None:
             score_summary = useful_score_summary
 
-        if 'sr' in score_summary.keys():
-            # select model by Success Rate
-            if score_summary['sr'] >= best_val[args.val_split]['sr']:
-                # best_val[args.val_split]['spl'] = score_summary['spl'] # bugs
-                best_val[args.val_split]['sr'] = score_summary['sr']
-                best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
+        # if 'sr' in score_summary.keys():
+        #     # select model by Success Rate
+        #     if score_summary['sr'] >= best_val[args.val_split]['sr']:
+        #         # best_val[args.val_split]['spl'] = score_summary['spl'] # bugs
+        #         best_val[args.val_split]['sr'] = score_summary['sr']
+        #         best_val[args.val_split]['state'] = 'Epoch %d %s' % (epoch, loss_str)
 
-                save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
-                if not only_inference:
-                    vln_model.save(epoch, str(save_ckpt_file),
-                                   vln_bert_optimizer=vln_optimizer[0],
-                                   critic_optimizer=vln_optimizer[1]
-                                   )
-        else:
-            save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
-            if not only_inference:
-                vln_model.save(epoch, str(save_ckpt_file),
-                               vln_bert_optimizer=vln_optimizer[0],
-                               critic_optimizer=vln_optimizer[1]
-                               )
+        #         save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+        #         if not only_inference:
+        #             vln_model.save(epoch, str(save_ckpt_file),
+        #                            vln_bert_optimizer=vln_optimizer[0],
+        #                            critic_optimizer=vln_optimizer[1]
+        #                            )
+        # else:
+        #     save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+        #     if not only_inference:
+        #         vln_model.save(epoch, str(save_ckpt_file),
+        #                        vln_bert_optimizer=vln_optimizer[0],
+        #                        critic_optimizer=vln_optimizer[1]
+        #                        )
 
 
 

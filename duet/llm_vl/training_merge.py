@@ -15,7 +15,7 @@ from tools.train.distributed import init_distributed_device
 from open_flamingo import create_model_and_transforms
 from dataset.dataset_src import SrcDataset, build_dataloader
 from duet.llm_vl.utils.data import \
-    ImageFeaturesDB, ObjectFeatureDB, load_obj2vps, SOONObjectFeatureDB
+    ImageFeaturesDB, ObjectFeatureDB, EvaImageFeaturesDB
 from tools.finetune_utils import (get_tokenizer_token_ids, )
 from tools.train.train_utils import (
     get_grouped_params, check_checkpoint,
@@ -42,7 +42,15 @@ def init_config(args):
     # downstream duet datasets
     _source_dir = Path(__file__).resolve().parent.parent.parent
 
-    args.img_ft_file = _source_dir / "build/duet/R2R/features/view_timm_imagenet_vitb16"
+    if args.img_ft_file == "vitbase":
+        args.img_ft_file = _source_dir / "build/duet/R2R/features/view_timm_imagenet_vitb16"
+    elif args.img_ft_file == "eva_clip_4096": # bridge 
+        args.img_ft_file = _source_dir / "build/duet/R2R/features/eva_clip_bridge.hdf5"
+    elif args.img_ft_file == "eva_clip_1408": # eva_clip
+        args.img_ft_file = _source_dir / "build/duet/R2R/features/eva_clip_imgfeats.hdf5"
+    else:
+        raise NotImplementedError
+
     args.obj_ft_file = _source_dir / "build/duet/SOON/features/obj2d_ade20k_timm_vitb16"
 
     args.source_dir = _source_dir.__str__()
@@ -151,14 +159,14 @@ def main():
         args.graph_sprels = True
         args.fusion = 'dynamic'
 
-        args.image_feat_size = 768
+        # args.image_feat_size = 768
         args.angle_feat_size = 4
         args.obj_feat_size = 768
 
         args.multi_startpoints = False
         args.multi_endpoints = True
         args.max_objects = 70
-        args.max_action_len = 20
+        args.max_action_len = 15
 
         args.num_l_layers = 9
         args.num_pano_layers = 2
@@ -176,7 +184,7 @@ def main():
         # experiments
         if args.tokenizer_path == 'facebook/opt-iml-1.3b':
             param_sums = sum(p.numel() for p in vln_model.vln_bert.vln_bert.parameters() if p.requires_grad)
-            print("OPT model initialized with {:.2f} M trainable parameters".format(param_sums/1000**2))
+            logger.info("OPT model initialized with {:.2f} M trainable parameters".format(param_sums/1000**2))
             # freeze opt weights
             # vln_model.vln_bert.vln_bert.lang_model.requires_grad_(False)
             # vln_model.vln_bert.vln_bert.lang_model.\
@@ -184,7 +192,7 @@ def main():
             # vln_model.vln_bert.vln_bert.lang_model.\
             #     mapper.requires_grad_(True)
             param_sums = sum(p.numel() for p in vln_model.vln_bert.vln_bert.parameters() if p.requires_grad)
-            print("after unfreeze: OPT model initialized with {:.2f} M trainable parameters".format(param_sums/1000**2))
+            logger.info("after unfreeze: OPT model initialized with {:.2f} M trainable parameters".format(param_sums/1000**2))
 
         language_model = None
         tokenizer = None
@@ -192,7 +200,13 @@ def main():
     random_seed(args.seed + args.rank)
 
     ############# Dataset #############
-    feat_db = ImageFeaturesDB(str(args.img_ft_file), args.image_feat_size)
+    if args.use_eva_clip:
+        feat_db = EvaImageFeaturesDB(str(args.img_ft_file), args.image_feat_size)
+        logger.info(" use eva_clip image features, image feat size: {}".format(args.image_feat_size))
+    else:
+        logger.info(" use duet image features, image feat size: {}".format(args.image_feat_size))
+        feat_db = ImageFeaturesDB(str(args.img_ft_file), args.image_feat_size)
+    
     obj_db = ObjectFeatureDB(str(args.obj_ft_file), args.obj_feat_size)
 
     r2r_dataset = SrcDataset(
@@ -296,13 +310,13 @@ def main():
                 logger=logger,
                 best_val=best_val
             )
-        if args.rank == 0:
-            save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
-            vln_model.save(epoch, str(save_ckpt_file),
-                           vln_bert_optimizer=vln_optimizer[0],
-                           critic_optimizer=vln_optimizer[1]
-                           )
-            logger.info("\n[Best Result till Now]:\n{} | {}".format(args.val_split, best_val[args.val_split]['state']))
+        # if args.rank == 0:
+        #     save_ckpt_file = Path(args.run_name) / "best_{}".format(args.val_split)
+        #     vln_model.save(epoch, str(save_ckpt_file),
+        #                    vln_bert_optimizer=vln_optimizer[0],
+        #                    critic_optimizer=vln_optimizer[1]
+        #                    )
+        #     logger.info("\n[Best Result till Now]:\n{} | {}".format(args.val_split, best_val[args.val_split]['state']))
 
 
 if __name__ == "__main__":

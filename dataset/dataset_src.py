@@ -266,9 +266,9 @@ class SrcDataset(torch_data.Dataset):
         self.obj_db = obj_feat_db
 
         if self.training:
-            self.multi_endpoints = args.multi_endpoints
-            self.multi_startpoints = args.multi_startpoints
-            self.max_objects = args.max_objects
+            self.multi_endpoints = args.multi_endpoints # True
+            self.multi_startpoints = args.multi_startpoints # False
+            self.max_objects = args.max_objects # 70
         else:
             self.multi_endpoints = False
             self.multi_startpoints = False
@@ -579,6 +579,7 @@ class SrcDataset(torch_data.Dataset):
                 raise NotImplementedError
             else:
                 if feature is None:
+                    # import ipdb;ipdb.set_trace()
                     feature = self.feat_db.get_image_feature(state.scanId, state.location.viewpointId)
 
                 # Full features

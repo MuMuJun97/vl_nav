@@ -668,7 +668,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         self.history = None
         self.hist_vis = None
 
-        self.init_weights()
+        # self.init_weights()
 
     def forward_panorama_per_step(
             self, view_img_fts, obj_img_fts, loc_fts, nav_types, view_lens, obj_lens
@@ -933,10 +933,14 @@ def get_vlnbert_models_ddp(args, config=None):
     vis_config.pred_head_dropout_prob = 0.1
     vis_config.use_lang2visn_attn = False
     new_ckpt_weights = {}
-    visual_model = GlocalTextPathNavCMT.from_pretrained(
-        pretrained_model_name_or_path=None,
+    # visual_model = GlocalTextPathNavCMT.from_pretrained(
+    #     pretrained_model_name_or_path=None,
+    #     config=vis_config,
+    #     state_dict=new_ckpt_weights
+    # )
+    # import ipdb;ipdb.set_trace()
+    visual_model = GlocalTextPathNavCMT(
         config=vis_config,
-        state_dict=new_ckpt_weights
     )
 
     return visual_model

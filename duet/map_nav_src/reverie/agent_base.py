@@ -40,6 +40,7 @@ class BaseAgent(object):
     def get_agent(name):
         return globals()[name+"Agent"]
 
+    @torch.no_grad()
     def test(self, iters=None, **kwargs):
         self.env.reset_epoch(shuffle=(iters is not None))   # If iters is not none, shuffle the env batch
         self.losses = []
@@ -64,6 +65,7 @@ class BaseAgent(object):
                 if looped:
                     break
 
+    @torch.no_grad()
     def test_viz(self, iters=None, **kwargs):
         self.env.reset_epoch(shuffle=(iters is not None))   # If iters is not none, shuffle the env batch
         self.losses = []
@@ -187,7 +189,7 @@ class Seq2SeqAgent(BaseAgent):
                     self.rollout(
                         train_ml=self.args.ml_weight, train_rl=False, **kwargs
                     )
-                self.feedback = self.args.dagger_sample  # 'sample'
+                self.feedback = self.args.dagger_sample
                 self.rollout(train_ml=1, train_rl=False, **kwargs)
             else:
                 if self.args.ml_weight != 0:
@@ -199,7 +201,7 @@ class Seq2SeqAgent(BaseAgent):
                 self.rollout(train_ml=None, train_rl=True, **kwargs)
 
             #print(self.rank, iter, self.loss)
-            self.loss.backward()
+            # self.loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.vln_bert.parameters(), 40.)
 

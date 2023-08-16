@@ -66,7 +66,7 @@ def build_dataset(args, rank=0):
         )
 
     # val_env_names = ['val_train_seen']
-    val_env_names = ['val_unseen'] # 'val_train_seen', 'val_seen',
+    val_env_names = ['val_train_seen', 'val_seen', 'val_unseen']
 
     if args.submit:
         val_env_names.append('test')
@@ -138,8 +138,6 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
 
     best_val = {'val_unseen': {"spl": 0., "sr": 0., "state":""}}
 
-    debug = True
-
     for idx in range(start_iter, start_iter+args.iters, args.log_every):
         listner.logs = defaultdict(list)
         interval = min(args.log_every, args.iters-idx)
@@ -147,11 +145,8 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
 
         # Train for log_every interval
         if aug_env is None:
-            if debug:
-                pass
-            else:
-                listner.env = train_env
-                listner.train(interval, feedback=args.feedback)  # Train interval iters
+            listner.env = train_env
+            listner.train(interval, feedback=args.feedback)  # Train interval iters
         else:
             jdx_length = len(range(interval // 2))
             for jdx in range(interval // 2):
@@ -282,7 +277,7 @@ def main():
         torch.cuda.set_device(args.local_rank)
     else:
         rank = 0
-
+    torch.cuda.set_device(rank)
     set_random_seed(args.seed + rank)
     train_env, val_envs, aug_env = build_dataset(args, rank=rank)
 
